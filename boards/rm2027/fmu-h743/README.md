@@ -83,6 +83,27 @@ IMU     ICM-42688-P      SPI1
 6. 无 I/O 协处理器 → 不存在 px4io 驱动；MAIN/AUX 之分在本板不适用
 ```
 
+## ⚠️ 跨端编辑提醒
+
+本目录的文件属于 **Linux 侧执行的工程**，行尾必须 **LF**：
+
+```text
+init/rc.board_sensors    NuttX nsh 执行的 shell 脚本 —— CRLF 会直接失败
+default.px4board.wip     Kconfig 片段（CRLF 可能被解析出多余字符）
+src/*.cpp / *.h          编译源码
+```
+
+若在 Windows 侧编辑过任何文件，提交前先跑：
+
+```bash
+sed -i 's/\r$//' <file>            # 或 dos2unix <file>
+bash /mnt/h/AI/shared/tools/maintenance/check-lineendings.sh
+```
+
+约定全文：`H:\AI\shared\tools\maintenance\跨端行尾与脚本约定.md`
+
+---
+
 ## 下一步（解锁顺序）
 
 ```text

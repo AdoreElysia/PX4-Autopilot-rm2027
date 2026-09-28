@@ -1,5 +1,13 @@
 #!/bin/sh
 #
+# ⚠️ 跨端提醒（2026-09-28 标注）
+#    本文件是 **Linux/NuttX 侧执行的 shell 脚本**，行尾必须是 LF。
+#    若在 Windows 侧编辑后保存成 CRLF，目标机上执行会失败（NuttX nsh 尤其严格）。
+#    修复：sed -i 's/\r$//' init/rc.board_sensors
+#    当前行尾：LF
+#    相关约定：rm2027-drone 工作区 tools/maintenance/跨端行尾与脚本约定.md
+#
+#
 # board specific sensors init
 #------------------------------------------------------------------------------
 #
