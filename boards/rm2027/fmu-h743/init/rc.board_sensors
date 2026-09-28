@@ -1,0 +1,34 @@
+#!/bin/sh
+#
+# board specific sensors init
+#------------------------------------------------------------------------------
+#
+# ⚠️⚠️ 本文件是「草稿」，尚未可用 ⚠️⚠️
+#
+# 现状：外设级分配已确认（来自原理图「资源汇总」表），
+#       但 **GPIO 引脚号与 NuttX 总线编号全部未知**（见 ../../README.md）。
+#
+# 下面所有 -b 值都是**占位符**，不是从图纸得到的事实。
+# 在 src/i2c.cpp / src/spi.cpp 写好、总线编号确定之前，
+# 这个文件跑起来会去错的总线上找传感器。
+#
+# 依据：projects/competition/rm2027-drone/firmware/fmu-h743/资源与引脚映射.md
+#------------------------------------------------------------------------------
+
+board_adc start
+
+# ICM-42688-P gyro/accel  —— 原理图：SPI1 For ICM 42688（GYRO）
+# TODO(pins): -b 1 是占位；真实 SPI 总线号取决于 src/spi.cpp 里的总线声明顺序
+# TODO(pins): -R 0 是占位；真实值取决于 IMU 在 PCB 上的贴装方向
+icm42688p -s -b 1 -R 0 start
+
+# IST8310 magnetometer   —— 原理图：IIC4 For IST8310（Mag）
+# TODO(pins): -b 4 是占位；PX4 的 I2C 总线号是「声明顺序」，不等于外设编号 IIC4
+ist8310 -X -b 4 -R 0 start
+
+# SPA06-003 barometer    —— 原理图：IIC2 For SPA06(Baro)
+# TODO(pins): -b 2 同样是占位
+spa06 -I -b 2 start
+
+# DBUS 遥控器输入        —— 原理图：UART5 for DBUS
+# RC 输入不走这里，走 rc.board_defaults 里的 RC 串口配置（TODO 未完成）
