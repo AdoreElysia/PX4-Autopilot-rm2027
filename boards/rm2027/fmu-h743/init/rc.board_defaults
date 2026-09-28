@@ -1,0 +1,16 @@
+#!/bin/sh
+#
+# board specific defaults
+#------------------------------------------------------------------------------
+#
+# 本板：rm2027/fmu-h743
+#
+# ⚠️ 电池参数暂时留空。
+#    原理图上只有 4 路 **ESC 电流**采样（PC0/PC1/PC4/PC5），
+#    没有找到电池总电压分压网络。在硬件组确认电压来源之前，
+#    不设置 BAT1_V_DIV / BAT1_A_PER_V —— 设错标度比不设更危险。
+#    见 firmware/fmu-h743/开发日志/04-待确认与风险.md 的 Q-02b
+#
+# 模板板 matek 的设置（供对比，未启用）：
+#   param set-default BAT1_V_DIV 11
+#   param set-default BAT1_A_PER_V 40
