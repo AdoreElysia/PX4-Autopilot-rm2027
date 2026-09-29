@@ -162,6 +162,13 @@ private:
 
 	px4::atomic<hrt_abstime> _drdy_timestamp_sample{0};
 	bool _data_ready_interrupt_enabled{false};
+	// ★ rm2027/fmu-h743 板级补丁（2026-09-30）：
+	// 本板的 6 轴 IMU 是【BMI270 寄存器图兼容件】，CHIP_ID(0x00) 读出 0x00 而非正品 0x24。
+	// 实测：它的寄存器图/功能与 BMI270 一致，但【不能】上传 329 字节微码 ——
+	//       一旦上传，器件会锁死（读全 0xFF），只能断电恢复。
+	// 故：仅当识别到这种"ID=0x00 的兼容件"时，跳过微码上传。
+	// 依据：rm2027-drone/firmware/fmu-h743/开发日志/09-IMU寄存器指纹.md
+	bool _skip_microcode{false};
 
 	enum class STATE : uint8_t {
 		WAIT_FOR_RESET,

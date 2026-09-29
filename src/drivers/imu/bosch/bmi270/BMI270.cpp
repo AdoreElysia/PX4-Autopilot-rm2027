@@ -245,6 +245,15 @@ int BMI270::probe()
 	const uint8_t CHIP_ID = RegisterRead(Register::CHIP_ID);
 
 	if (CHIP_ID != chip_id) {
+		// ★ rm2027/fmu-h743 板级补丁：本板器件是 BMI270 兼容件，CHIP_ID=0x00。
+		//    它不是正品，但寄存器图/功能与 BMI270 一致，只是【不能上传微码】。
+		//    故接受 0x00 并标记"跳过微码"。见开发日志 09。
+		if (CHIP_ID == 0x00) {
+			_skip_microcode = true;
+			PX4_INFO("BMI270-compatible part detected (CHIP_ID=0x00): microcode upload will be SKIPPED");
+			return PX4_OK;
+		}
+
 		DEVICE_DEBUG("unexpected CHIP_ID 0x%02x", CHIP_ID);
 		return PX4_ERROR;
 	}
@@ -280,8 +289,11 @@ void BMI270::RunImpl()
 
 
 		*/
-		if ((RegisterRead(Register::CHIP_ID) == chip_id)) {
-			PX4_DEBUG("Read from CHIP_ID register and the IDs match");
+	{
+		const uint8_t chip_id_now = RegisterRead(Register::CHIP_ID);
+
+		if ((chip_id_now == chip_id) || (_skip_microcode && (chip_id_now == 0x00))) {
+			PX4_DEBUG("Read from CHIP_ID register and the IDs match (or compatible part)");
 
 			// 1. Disable PWR_CONF.adv_power_save and wait for 450us
 
@@ -303,10 +315,20 @@ void BMI270::RunImpl()
 		}
 
 		break;
+	}
 
 	case STATE::MICROCODE_LOAD:
 
 		{
+			// ★ rm2027/fmu-h743 板级补丁：BMI270 兼容件必须【跳过】微码上传。
+			//    实测上传 329 字节微码会把该器件锁死（此后读全 0xFF，只能断电恢复）。
+			//    已证明不上传微码它照样能出数据（PWR_CTRL=0x0E → 0x0C~0x17 有活数据）。
+			if (_skip_microcode) {
+				PX4_INFO("Skipping BMI270 microcode upload (compatible part)");
+				_state = STATE::CONFIGURE;
+				ScheduleDelayed(1_ms);
+				break;
+			}
 
 			// 2. Write 0x00 to INIT_CTRL
 
