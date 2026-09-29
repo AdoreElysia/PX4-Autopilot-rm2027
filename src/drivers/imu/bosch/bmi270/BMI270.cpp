@@ -641,27 +641,33 @@ void BMI270::SetAccelScaleAndRange()
 	//   （实测：ACC_RANGE=0x03 时静止 1g 只读到 1185 counts，手册应为 2048 counts/g；
 	//    0x00/0x01/0x02 分别是 9289.5/4648/2316，严格 8:4:2:1 ⇒ 只有绝对增益偏小）。
 	//   这里乘上实测修正，使静止合矢量 = 1g。正品芯片（_skip_microcode == false）不受影响。
+	//
+	// ⚠️ 修正只作用于【scale】，不要作用于 set_range()：
+	//    set_range() 声明的是器件的【物理量程】（±2/4/8/16g），是硬件属性；
+	//    1.73x 是"每 g 对应的码值偏小"，属于 scale 的换算系数，量程并没有变。
+	//    （先前 set_range 也被乘了修正：虽然 _clip_limit = range/scale 里分子分母同时
+	//     抵消、裁剪行为没变，但 sensor_accel.range 会报成 1.73 倍，对外语义是错的。）
 	const float gain_correction = _skip_microcode ? ACCEL_COMPAT_GAIN_CORRECTION : 1.f;
 
 	switch (ACC_RANGE) {
 	case acc_range_2g:
 		_px4_accel.set_scale(2.f * CONSTANTS_ONE_G / 32768.f * gain_correction);
-		_px4_accel.set_range(2.f * CONSTANTS_ONE_G * gain_correction);
+		_px4_accel.set_range(2.f * CONSTANTS_ONE_G);
 		break;
 
 	case acc_range_4g:
 		_px4_accel.set_scale(4.f * CONSTANTS_ONE_G / 32768.f * gain_correction);
-		_px4_accel.set_range(4.f * CONSTANTS_ONE_G * gain_correction);
+		_px4_accel.set_range(4.f * CONSTANTS_ONE_G);
 		break;
 
 	case acc_range_8g:
 		_px4_accel.set_scale(8.f * CONSTANTS_ONE_G / 32768.f * gain_correction);
-		_px4_accel.set_range(8.f * CONSTANTS_ONE_G * gain_correction);
+		_px4_accel.set_range(8.f * CONSTANTS_ONE_G);
 		break;
 
 	case acc_range_16g:
 		_px4_accel.set_scale(16.f * CONSTANTS_ONE_G / 32768.f * gain_correction);
-		_px4_accel.set_range(16.f * CONSTANTS_ONE_G * gain_correction);
+		_px4_accel.set_range(16.f * CONSTANTS_ONE_G);
 		break;
 	}
 }
