@@ -255,6 +255,13 @@ void BMI270::print_status()
 	if (_skip_microcode) {
 		PX4_INFO("compatible part: polling data registers 0x0C-0x17 every %u us (%u Hz)",
 			 (unsigned)POLL_INTERVAL_US, (unsigned)(1000000 / POLL_INTERVAL_US));
+
+		// 最近一次配置自查的快照（厂商手册 §5.8）。两个 *_CONF_ERR 位为 0 才说明
+		// ACC_CONF/GYR_CONF 被器件接受了 —— 这是判断"读数偏低"是不是配置问题的第一手证据。
+		PX4_INFO("compatible part: last DATA_STAT(0x0B)=0x%02x (ACC_CONF_ERR=%d GYR_CONF_ERR=%d)",
+			 (unsigned)_compat_data_stat,
+			 (int)((_compat_data_stat & DATA_STAT_BIT::acc_conf_err) != 0),
+			 (int)((_compat_data_stat & DATA_STAT_BIT::gyr_conf_err) != 0));
 	}
 
 	perf_print_counter(_bad_register_perf);
@@ -279,24 +286,25 @@ int BMI270::probe()
 	const uint8_t CHIP_ID = RegisterRead(Register::CHIP_ID);
 
 	if (CHIP_ID != chip_id) {
-		// ★ rm2027/fmu-h743 板级补丁：本板器件是 BMI270 兼容件，CHIP_ID=0x00。
-		//    它不是正品，但寄存器图/功能与 BMI270 一致，只是【不能上传微码】。
-		//    故接受 0x00 并标记"跳过微码"。见开发日志 09。
+		// ★ rm2027/fmu-h743 板级补丁：本板器件是「BMI270 寄存器图兼容件」，
+		//    寄存器图/功能与 BMI270 一致，但【不能上传微码】。
 		//
-		//    ⚠️ 2026-09-30 拿到厂商手册（华轩阳 HXY「ICM-42688P」）后更正/补强：
-		//       本片器件 ID 寄存器是 WHO_AM_I = 0x01、缺省值 0x6A（手册 §4.1/§5.1），
-		//       0x00 不在手册寄存器表里、读出来是 0x00 —— 正品 BMI270 的 CHIP_ID 在 0x00=0x24，
-		//       本片把它挪到了 0x01。所以更严谨的识别是 RegisterRead(0x01) == 0x6A
-		//       （transfer() 补丁已保证 RegisterRead 返回的就是该地址的内容）。
-		//       但"接受 0x00"这条已在实机上验证可用（驱动能启动、数据能出），
-		//       故本次【不改识别逻辑】，只把更优方案记在这里，等下次上板一并改测。
-		if (CHIP_ID == 0x00) {
+		//    识别特征有两条，任一成立即认作兼容件（并置 _skip_microcode）：
+		//      1) WHO_AM_I(0x01) == 0x6A —— 厂商手册（华轩阳 HXY「ICM-42688P」§4.1/§5.1）
+		//         口径：本片把器件 ID 从 BMI270 的 0x00 挪到了 0x01，0x00 不在它的寄存器表里。
+		//      2) CHIP_ID(0x00) == 0x00 —— 历史口径，已在实机验证过驱动能启动、数据能出，
+		//         保留作兜底：即使 0x01 读出来不是 0x6A，也不会退化成"驱动起不来"。
+		//    ⚠️ 红线：兼容件【绝不能】上传微码（实测会把器件锁死，只能断电恢复）。
+		const uint8_t who_am_i = RegisterRead(Register::WHO_AM_I);
+
+		if ((who_am_i == compat_who_am_i) || (CHIP_ID == 0x00)) {
 			_skip_microcode = true;
-			PX4_INFO("BMI270-compatible part detected (CHIP_ID=0x00): microcode upload will be SKIPPED");
+			PX4_INFO("BMI270-compatible part detected (WHO_AM_I(0x01)=0x%02x, CHIP_ID(0x00)=0x%02x): microcode upload will be SKIPPED",
+				 (unsigned)who_am_i, (unsigned)CHIP_ID);
 			return PX4_OK;
 		}
 
-		DEVICE_DEBUG("unexpected CHIP_ID 0x%02x", CHIP_ID);
+		DEVICE_DEBUG("unexpected CHIP_ID 0x%02x (WHO_AM_I 0x%02x)", CHIP_ID, who_am_i);
 		return PX4_ERROR;
 	}
 
@@ -513,17 +521,21 @@ void BMI270::RunImpl()
 				_failure_count = 0;
 
 				// 周期性回读关键配置寄存器（每秒 1 个，循环），确认配置没被器件丢掉。
-				// 只查兼容件真正存在且会写的 _register_cfg[0..4]：FIFO/INT 那几个地址
-				// 在本片上不存在，查了只会白白累加 _bad_register_perf。失败只计数、不 Reset
-				// （和原 FIFO 路径的处理一致，原代码里那处 Reset() 本来就是注释掉的）。
+				// 只查兼容件真正写过、且本片寄存器表里存在的 _register_cfg[1..4]
+				// （PWR_CTRL / ACC_CONF / GYR_CONF / ACC_RANGE）；
+				// [0] 是 PWR_CONF(0x7C)——本片没有这个地址、兼容件分支也不再写它；
+				// FIFO/INT 那几个地址同样不存在。查了只会白白累加 _bad_register_perf。
+				// 失败只计数、不 Reset（和原 FIFO 路径一致，原代码里那处 Reset() 本来就是注释掉的）。
 				if (hrt_elapsed_time(&_last_config_check_timestamp) > 1_s) {
 					_last_config_check_timestamp = now;
 
-					if (!RegisterCheck(_register_cfg[_checked_register % size_register_cfg_compat])) {
+					const uint8_t idx = 1 + (_checked_register % (size_register_cfg_compat - 1));
+
+					if (!RegisterCheck(_register_cfg[idx])) {
 						perf_count(_bad_register_perf);
 					}
 
-					_checked_register = (_checked_register + 1) % size_register_cfg_compat;
+					_checked_register++;
 
 					_px4_accel.set_error_count(perf_event_count(_bad_register_perf) + perf_event_count(_bad_transfer_perf));
 					_px4_gyro.set_error_count(perf_event_count(_bad_register_perf) + perf_event_count(_bad_transfer_perf));
@@ -765,27 +777,42 @@ bool BMI270::Configure()
 	};
 
 
-	// ★ rm2027/fmu-h743 板级修正（2026-09-30）：厂商手册 5.45 PWR_CTRL(7Dh) 的备注明确要求
-	//   「0x7D 要先写入 0x0E 并延时 10ms 之后再进行其他配置。另外，在配置完寄存器后建议
-	//    延时 1ms 再进行寄存器读取操作。」
-	//   upstream 是一口气把全部寄存器写完的，这两条时序都没满足。
-	//   ⇒ 兼容件（_skip_microcode）按手册的顺序来；正品 BMI270 仍走 upstream 原路径，
-	//     避免在上游已验证的行为上引入回归。
+	// ★ rm2027/fmu-h743 板级修正（2026-09-30）：厂商手册（华轩阳 HXY「ICM-42688P」）里
+	//   有三条 upstream 没满足的约束，兼容件分支按手册顺序配置：
+	//
+	//   §5.45：「0x7D 要先写入 0x0E 并延时 10ms 之后再进行其他配置。另外，在配置完寄存器后
+	//           建议延时 1ms 再进行寄存器读取操作。」
+	//   §5.39：「GYR_NOISE_PERF 在切换配置时需要先将加速度计和陀螺仪关闭再进行配置，然后再
+	//           打开加速度计和陀螺仪」—— 本驱动写的 GYR_CONF(0xEC) 正好带 GYR_NOISE_PERF=1，
+	//           所以这一笔必须在【关闭状态】下写，否则该位可能根本进不去。
+	//   §4.1 ：PWR_CONF(0x7C) 不在本片寄存器表里（本片没有这个寄存器），不要写它。
+	//
+	//   综合 §5.39 与 §5.45，顺序取：先关 → 关着写 GYR_CONF → 开(0x0E) → 10ms →
+	//   写 ACC_CONF/ACC_RANGE → 1ms → 回读 + DATA_STAT 自查。
+	//   正品 BMI270 仍走 upstream 原路径（下面的 else 分支），不引入回归。
 	if (_skip_microcode) {
 
-		// 1) 先写 PWR_CONF，再写 PWR_CTRL = 0x0E（accel_en|gyr_en|temp_en）
-		RegisterSetAndClearBits(Register::PWR_CONF, 0, ACC_PWR_CONF_BIT::acc_pwr_save);
+		// 1) 先把加速度计/陀螺仪关掉（上电/复位后本来就是关的，这里显式写一次，
+		//    既满足 §5.39 的前提，也让每次（重）配置都从确定的初态开始）
+		RegisterWrite(Register::PWR_CTRL, 0x00);
+		px4_usleep(1_ms);   // 手册未给具体延时，取 1ms 保证关断生效
+
+		// 2) 【关着】写 GYR_CONF（含 GYR_NOISE_PERF，手册 §5.39 要求）
+		ApplyRegisterConfig(Register::GYR_CONF);
+
+		// 3) 手册 §5.45：先写 PWR_CTRL = 0x0E（accel_en|gyr_en|temp_en），再延时 10ms
 		RegisterSetAndClearBits(Register::PWR_CTRL,
 					PWR_CTRL_BIT::accel_en | PWR_CTRL_BIT::gyr_en | PWR_CTRL_BIT::temp_en, 0);
-
-		// 2) 手册要求：写完 0x0E 延时 10ms 再配其它
 		px4_usleep(10_ms);
 
-		// 3) 其余配置。跳过已写过的 PWR_CONF/PWR_CTRL，以及本片寄存器表里不存在的
-		//    FIFO_* / INT_* 地址（厂商手册：FIFO 在 0x1C~0x21、中断在 0x06/0x07，
-		//    而本表用的是 BMI270 的 0x46~0x49 / 0x53 / 0x58）。
+		// 4) 其余配置（ACC_CONF / ACC_RANGE）。跳过：已经写过的 PWR_CTRL/GYR_CONF、
+		//    本片不存在的 PWR_CONF，以及本片寄存器表里不存在的 FIFO_*/INT_* 地址
+		//    （厂商手册：FIFO 在 0x1C~0x21、中断在 0x06/0x07，而本表用的是 BMI270 的
+		//     0x46~0x49 / 0x53 / 0x58）。
 		for (const auto &reg_cfg : _register_cfg) {
-			if (reg_cfg.reg == Register::PWR_CONF || reg_cfg.reg == Register::PWR_CTRL) {
+			if (reg_cfg.reg == Register::PWR_CONF
+			    || reg_cfg.reg == Register::PWR_CTRL
+			    || reg_cfg.reg == Register::GYR_CONF) {
 				continue;
 			}
 
@@ -796,8 +823,13 @@ bool BMI270::Configure()
 			RegisterSetAndClearBits(reg_cfg.reg, reg_cfg.set_bits, reg_cfg.clear_bits);
 		}
 
-		// 4) 手册要求：配完延时 1ms 再回读
+		// 5) 手册 §5.45：配完延时 1ms 再回读
 		px4_usleep(1_ms);
+
+		// 6) 自查：读 DATA_STAT(0x0B)（手册 §5.8），看器件有没有接受刚才的配置。
+		//    这一步是判断"静止 1g 只读到 ~1185 counts（手册 2048）"到底是
+		//    【配置没生效】还是【器件增益/零偏】问题的第一手证据 —— 上板先看这条日志。
+		CheckCompatibleDataStat();
 
 	} else {
 
@@ -810,7 +842,9 @@ bool BMI270::Configure()
 	// now check that all are configured
 
 	for (const auto &reg_cfg : _register_cfg) {
-		if (_skip_microcode && is_fifo_or_int_register(reg_cfg.reg)) {
+		if (_skip_microcode && (is_fifo_or_int_register(reg_cfg.reg) || reg_cfg.reg == Register::PWR_CONF)) {
+			// FIFO/INT 地址在本片上不存在；PWR_CONF(0x7C) 本片也没有、兼容件分支不再写它。
+			// 对不存在的寄存器做回读核对没有意义，跳过（免得 _bad_register_perf 白涨）。
 			continue;
 		}
 
@@ -824,6 +858,56 @@ bool BMI270::Configure()
 
 	success = true;
 	return success;
+}
+
+// ★ rm2027/fmu-h743（2026-09-30）兼容件专用：按 _register_cfg 里登记的"期望位/清除位"
+// 写【单个】寄存器。手册时序路径要在不同时刻分别写不同寄存器（见 Configure 的 §5.39/§5.45），
+// 用这个入口可以继续复用 _register_cfg 这一份配置常量，不必在别处再抄一份。
+void BMI270::ApplyRegisterConfig(Register reg)
+{
+	for (const auto &reg_cfg : _register_cfg) {
+		if (reg_cfg.reg == reg) {
+			RegisterSetAndClearBits(reg_cfg.reg, reg_cfg.set_bits, reg_cfg.clear_bits);
+			return;
+		}
+	}
+}
+
+// ★ rm2027/fmu-h743（2026-09-30）兼容件专用配置自查。
+//
+// 依据：厂商手册（华轩阳 HXY「ICM-42688P」）§5.8 DATA_STAT(0x0B)：
+//   B5 GYR_CONF_ERR、B4 ACC_CONF_ERR —— 芯片自己在说"你给我的 ODR/BWP 组合我不接受"
+//   （§5.37：非法组合会自动回落到缺省值 0xA8 并置 ACC_CONF_ERR；§5.39 陀螺同理）。
+//
+// 为什么值得每次配置后都读：本片已经观察到"配置回读是影子寄存器"（回读恒等于写入值，
+// 但真实生效值可能不是），所以回读核对并不能证明配置生效；而这两个 ERR 位是【器件侧】的
+// 判定。上板后如果 ACC_CONF_ERR/GYR_CONF_ERR 被置起来，就说明"静止 1g 只读到 ~1185 counts
+// （手册应是 2048）"是【配置没生效】造成的，而不是器件增益/零偏问题 —— 那就不该动标定系数，
+// 而应该先修配置时序。
+void BMI270::CheckCompatibleDataStat()
+{
+	const uint8_t data_stat = RegisterRead(Register::DATA_STAT);
+	_compat_data_stat = data_stat;
+
+	const bool acc_err = (data_stat & DATA_STAT_BIT::acc_conf_err) != 0;
+	const bool gyr_err = (data_stat & DATA_STAT_BIT::gyr_conf_err) != 0;
+
+	if (acc_err || gyr_err) {
+		// 配置没被器件接受：计入 _bad_register_perf（会在 sensor_*_status 的 error_count 里体现）
+		perf_count(_bad_register_perf);
+	}
+
+	// 首次用 INFO（保证在 console 里看得见），之后降为 DEBUG，避免
+	// "读失败 → Reset → 重新配置" 这种循环把 console 环形缓冲区刷满。
+	if (!_compat_status_logged) {
+		PX4_INFO("compatible part: DATA_STAT(0x0B)=0x%02x ACC_CONF_ERR=%d GYR_CONF_ERR=%d",
+			 (unsigned)data_stat, (int)acc_err, (int)gyr_err);
+		_compat_status_logged = true;
+
+	} else {
+		PX4_DEBUG("compatible part: DATA_STAT(0x0B)=0x%02x ACC_CONF_ERR=%d GYR_CONF_ERR=%d",
+			  (unsigned)data_stat, (int)acc_err, (int)gyr_err);
+	}
 }
 
 int BMI270::DataReadyInterruptCallback(int irq, void *context, void *arg)

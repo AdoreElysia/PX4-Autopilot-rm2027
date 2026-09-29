@@ -89,6 +89,13 @@ private:
 	//     所以不做动态跟随；1 kHz 是保守且够用的选择。
 	static constexpr uint32_t POLL_INTERVAL_US{1000};
 
+	// ★ rm2027/fmu-h743（2026-09-30）：本板兼容件（华轩阳 HXY「ICM-42688P」）的器件 ID。
+	//   它把器件 ID 从 BMI270 的 CHIP_ID(0x00)=0x24 挪到了 WHO_AM_I(0x01)=0x6A（手册 §4.1/§5.1）。
+	//   probe() 里两条识别特征任一成立即认作兼容件：
+	//     1) WHO_AM_I(0x01) == 0x6A（手册口径，更严谨）
+	//     2) CHIP_ID(0x00) == 0x00（历史口径，已在实机验证可用，保留作兜底，避免识别改动回归）
+	static constexpr uint8_t compat_who_am_i{0x6A};
+
 	// ★★ rm2027/fmu-h743 板级补丁（2026-09-30）：本板兼容件的加速度计【实测灵敏度修正】。
 	//
 	// 实测（work/spi-runtime/datadump.tcl + rangetest.tcl，板子静止平放、CPU halted）：
@@ -103,8 +110,9 @@ private:
 	// ⚠️ 只在 _skip_microcode（兼容件）时生效，正品 BMI270 走原公式，不受影响。
 	static constexpr float ACCEL_COMPAT_GAIN_CORRECTION{2048.f / 1185.f};
 
-	// _register_cfg 的前 5 项是本板兼容件【真正存在且能写】的寄存器
-	// (PWR_CONF / PWR_CTRL / ACC_CONF / GYR_CONF / ACC_RANGE)；
+	// _register_cfg 的前 5 项里，下标 [1..4] = PWR_CTRL / ACC_CONF / GYR_CONF / ACC_RANGE
+	// 才是本板兼容件【真正存在且会写】的寄存器（也是周期性回读的对象）；
+	// 下标 [0] = PWR_CONF(0x7C) 在本片寄存器表里【不存在】，兼容件分支不写它。
 	//
 	// ⚠️ 2026-09-30 对照厂商数据手册（华轩阳 HXY「ICM-42688P」六轴惯性传感器模块手册，
 	//    华轩阳电子，文件 F58A73F6B8D6319EEDDDDA2ED27CA8C9.pdf）后更正：
@@ -208,6 +216,15 @@ private:
 
 	bool Configure();
 
+	// ★ rm2027/fmu-h743（2026-09-30）兼容件专用：
+	//   按 _register_cfg 里登记的"期望位/清除位"写【单个】寄存器 ——
+	//   手册时序路径要在不同时刻分别写不同寄存器，用这个入口避免再抄一份配置常量。
+	void ApplyRegisterConfig(Register reg);
+
+	// ★ 兼容件专用配置自查：读 DATA_STAT(0x0B)，看 ACC_CONF_ERR/GYR_CONF_ERR
+	//   （厂商手册 §5.8）—— 这是判断"配置到底被器件接受了没有"的第一手证据。
+	void CheckCompatibleDataStat();
+
 	// ★ 兼容件：一次性突发读 0x0C~0x17 并发布 sensor_accel / sensor_gyro
 	bool DataReadPublish(const hrt_abstime &timestamp_sample);
 
@@ -277,6 +294,13 @@ private:
 	// 故：仅当识别到这种"ID=0x00 的兼容件"时，跳过微码上传。
 	// 依据：rm2027-drone/firmware/fmu-h743/开发日志/09-IMU寄存器指纹.md
 	bool _skip_microcode{false};
+
+	// ★ rm2027/fmu-h743（2026-09-30）：最近一次配置自查读到的 DATA_STAT(0x0B)（手册 §5.8）。
+	//   两个 *_CONF_ERR 位为 0，才说明器件的加速度计/陀螺仪配置被它接受了。
+	//   上板后先看这一条日志：如果 ERR 位置起来了，就说明"静止 1g 只读到 1185 counts"
+	//   是【配置没生效】造成的，而不是器件增益问题（反之才需要走增益/零偏的判定实验）。
+	uint8_t _compat_data_stat{0};
+	bool _compat_status_logged{false};  ///< DATA_STAT 自查日志只 INFO 一次，重复时降 DEBUG 防刷屏
 
 	// ★ rm2027/fmu-h743 板级补丁（2026-09-30）：兼容件取数改走 STATE::DATA_READ
 	// （定时轮询直接读 0x0C~0x17）——厂商手册明确写了"加速度计和陀螺仪测量数据
