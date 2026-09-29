@@ -255,6 +255,12 @@ private:
 	perf_counter_t _fifo_empty_perf{perf_alloc(PC_COUNT, MODULE_NAME": FIFO empty")};
 	perf_counter_t _fifo_overflow_perf{perf_alloc(PC_COUNT, MODULE_NAME": FIFO overflow")};
 	perf_counter_t _fifo_reset_perf{perf_alloc(PC_COUNT, MODULE_NAME": FIFO reset")};
+	// ★ rm2027/fmu-h743：轮询路径的重复样本抑制（见 DataReadPublish 的注释）。
+	//   这个计数如果长期快速上涨，就说明器件真实 ODR 远低于 1 kHz 的轮询频率
+	//   （即 ACC_CONF/GYR_CONF 没真正生效）—— 是个很好的现场诊断信号。
+	perf_counter_t _duplicate_sample_perf{perf_alloc(PC_COUNT, MODULE_NAME": duplicate sample")};
+
+	uint8_t _last_data[12] {};   ///< 上一次读到的 0x0C~0x17 原始字节，用于重复样本抑制
 
 	perf_counter_t _drdy_missed_perf{nullptr};
 

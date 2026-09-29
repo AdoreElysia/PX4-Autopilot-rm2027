@@ -146,6 +146,7 @@ BMI270::~BMI270()
 	perf_free(_fifo_empty_perf);
 	perf_free(_fifo_overflow_perf);
 	perf_free(_fifo_reset_perf);
+	perf_free(_duplicate_sample_perf);
 	perf_free(_drdy_missed_perf);
 }
 
@@ -956,6 +957,33 @@ bool BMI270::DataReadPublish(const hrt_abstime &timestamp_sample)
 	const int16_t gyro_x = combine(buffer.data[6], buffer.data[7]);
 	const int16_t gyro_y = combine(buffer.data[8], buffer.data[9]);
 	const int16_t gyro_z = combine(buffer.data[10], buffer.data[11]);
+
+	// ★ rm2027/fmu-h743 板级保险（2026-09-30）：**重复样本抑制**。
+	//
+	// 为什么需要：轮询是【定时 1 kHz】的，而器件真实的有效 ODR 未必等于我们写的
+	// ACC_CONF/GYR_CONF —— 本片已观测到"配置回读是影子寄存器、真实生效值不等于回读值"
+	// （ACC_CONF 改 bwp 会让读数跳 2x；ACC_RANGE 在某些配置下看起来完全失效）。
+	// 若 ODR 实际停在缺省档（本片 ACC_CONF 缺省 0xA8 主频 100Hz / GYR_CONF 缺省 0xA9 200Hz），
+	// 1 kHz 轮询就会把【同一个样本重复发布 10 次】。
+	// 对 EKF2 来说，这等于"dt>0 但测量值一个字节都不变" ⇒ 被当成零角速度/恒定加速度，
+	// 会把陀螺零偏估计和姿态积分带偏 —— 比 1.73x 增益问题更危险。
+	//
+	// 做法：12 个原始字节与上一次**完全相同**就不发布。这样无论真实 ODR 是多少，
+	// 发布频率都自动跟随器件实际更新率，永不重复；代价仅是极端静止时可能少发一两个样本。
+	if ((buffer.data[0] == _last_data[0]) && (buffer.data[1] == _last_data[1]) &&
+	    (buffer.data[2] == _last_data[2]) && (buffer.data[3] == _last_data[3]) &&
+	    (buffer.data[4] == _last_data[4]) && (buffer.data[5] == _last_data[5]) &&
+	    (buffer.data[6] == _last_data[6]) && (buffer.data[7] == _last_data[7]) &&
+	    (buffer.data[8] == _last_data[8]) && (buffer.data[9] == _last_data[9]) &&
+	    (buffer.data[10] == _last_data[10]) && (buffer.data[11] == _last_data[11])) {
+
+		perf_count(_duplicate_sample_perf);
+		return true;   // 不是错误：只是这一拍器件还没更新
+	}
+
+	for (int i = 0; i < 12; i++) {
+		_last_data[i] = buffer.data[i];
+	}
 
 	// FLU → FRD（y、z 取反），与原 ProcessAccel / ProcessGyro 完全一致。
 	// update() 接收的是【原始码值】：内部做 rotate_3f(_rotation,...) 再乘 _scale 发布。
