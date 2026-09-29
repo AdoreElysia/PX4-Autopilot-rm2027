@@ -103,10 +103,17 @@ private:
 	// ⚠️ 只在 _skip_microcode（兼容件）时生效，正品 BMI270 走原公式，不受影响。
 	static constexpr float ACCEL_COMPAT_GAIN_CORRECTION{2048.f / 1185.f};
 
-	// _register_cfg 的前 5 项是本板兼容件【真正能写进去】的寄存器
+	// _register_cfg 的前 5 项是本板兼容件【真正存在且能写】的寄存器
 	// (PWR_CONF / PWR_CTRL / ACC_CONF / GYR_CONF / ACC_RANGE)；
-	// 之后的 FIFO_WTM_* / FIFO_CONFIG_* / INT1_IO_CTRL / INT_MAP_DATA 在兼容件上写不进去
-	// （实测 0x48/0x49 回读恒 0x00），既不再写、也不参与周期性回读检查。
+	//
+	// ⚠️ 2026-09-30 对照厂商数据手册（华轩阳 HXY「ICM-42688P」六轴惯性传感器模块手册，
+	//    华轩阳电子，文件 F58A73F6B8D6319EEDDDDA2ED27CA8C9.pdf）后更正：
+	//    本片寄存器表里【根本没有】0x46~0x49(FIFO_WTM/FIFO_CONFIG) 与 0x53/0x58(INT*)
+	//    这几个地址 —— 本片的 FIFO 在 0x1C~0x21（FIFO_CFG0/1/2 = 0x1C/0x1D/0x1E、
+	//    FIFO_STAT0/1 = 0x1F/0x20、FIFO_DATA = 0x21），中断配置在 INT_CFG1/2 = 0x06/0x07。
+	//    这才是"0x48/0x49 写进去回读恒 0x00、0x24/0x25 恒 0"的真正原因：
+	//    不是"这颗片子没有 FIFO"，而是原 BMI270 驱动写的是本片上【不存在的地址】。
+	//    ⇒ 兼容件分支不再碰这些地址，也不参与周期性回读检查。
 	static constexpr uint8_t size_register_cfg_compat{5};
 
 	static constexpr uint8_t ID_088 = 0x1E;
@@ -181,6 +188,12 @@ private:
 	 *      ⇒ 3 字节读的结果等于 R+1 的内容，即整串结果右移一格
 	 *   3) 由此推出：RegisterRead(CHIP_ID=0x00) 实际取到的是 0x01 的内容(0x6a)，
 	 *      probe() 必然失败 → 现象正是 "no instance started (no device on bus?)"。
+	 *   4) 2026-09-30 拿到厂商数据手册（华轩阳 HXY「ICM-42688P」六轴惯性传感器模块手册）后
+	 *      【正式确认】：手册 §3.2.1「SPI 读」写明读命令共 16 个时钟，Bit8-15 就是 DO(7:0)，
+	 *      "如果是读，则电路会在 bit8 开始驱动 SDO" ⇒ 地址字节之后【立刻】是数据，
+	 *      确实没有 dummy 字节。同时手册 §4.1 写明本片 WHO_AM_I 在 0x01、缺省值 0x6A
+	 *      （0x00 不在手册寄存器表里）——上面第 2、3 条看到的 0x6A 就是 0x01 的内容，
+	 *      所以这套"无 dummy + 右移补位"的补丁不是经验 hack，而是与手册时序一致。
 	 *
 	 * 这里【集中拦截读操作】：发出的时钟数与原来完全一致（不改变线上时序），
 	 * 只把收到的字节数组右移一格、dummy 位置填 0。这样 BMI270.cpp 里的
@@ -259,16 +272,23 @@ private:
 	// 依据：rm2027-drone/firmware/fmu-h743/开发日志/09-IMU寄存器指纹.md
 	bool _skip_microcode{false};
 
-	// ★ rm2027/fmu-h743 板级补丁（2026-09-30）：兼容件没有 FIFO，取数改走
-	// STATE::DATA_READ（定时轮询直接读 0x0C~0x17）。FIFO 那条路完整保留，
-	// 正品 BMI270（CHIP_ID=0x24）仍然走原来的 FIFO 路径，方便以后换回正品芯片。
-	// 理由：改的是"兼容件专属"的分支，正品路径零改动 ⇒ 换芯片不用回滚代码。
+	// ★ rm2027/fmu-h743 板级补丁（2026-09-30）：兼容件取数改走 STATE::DATA_READ
+	// （定时轮询直接读 0x0C~0x17）——厂商手册明确写了"加速度计和陀螺仪测量数据
+	//  以中断方式或【查询方式】获取"，所以轮询是被手册支持的用法。
+	//
+	// ⚠️ 注意（对照厂商手册后的更正）：本片其实【有】FIFO，只是地址与 BMI270 不同
+	//   （FIFO_CFG0/1/2 = 0x1C/0x1D/0x1E，FIFO_STAT0/1 = 0x1F/0x20，FIFO_DATA = 0x21，
+	//    共 2048 Byte = 341 组六轴数据；默认是 By-Pass 旁路模式）。
+	//   BMI270 的 FIFO 地址(0x46~0x49 / 0x24~0x26)在本片上不存在 ⇒ 原 FIFO 路径
+	//   拿不到数据是"地址不对"，不是"没有 FIFO"。
+	//   FIFO 代码完整保留：换回正品 BMI270（CHIP_ID=0x24）时 _skip_microcode 为 false，
+	//   自动走回原路径，不需要回滚代码。
 	enum class STATE : uint8_t {
 		WAIT_FOR_RESET,
 		RESET,
 		MICROCODE_LOAD,
 		CONFIGURE,
-		DATA_READ,   // ★ 兼容件专用：定时轮询读数据寄存器（无 FIFO）
+		DATA_READ,   // ★ 兼容件专用：定时轮询读数据寄存器 0x0C~0x17（手册支持的"查询方式"）
 		FIFO_READ,   // 正品 BMI270：原来的 FIFO 批量读路径（本板兼容件不走）
 	} _state{STATE::RESET};
 

@@ -48,9 +48,10 @@ static constexpr int16_t negate_clamped(int16_t v)
 	return (v == INT16_MIN) ? INT16_MAX : -v;
 }
 
-// ★ rm2027/fmu-h743 板级补丁（2026-09-30）：本板兼容件没有 FIFO、INT 行为未知，
-// _register_cfg 里这几个寄存器在兼容件上写不进去（实测 0x48/0x49 回读恒 0x00），
-// 兼容件分支下跳过它们的写与检查，避免做无用功。
+// ★ rm2027/fmu-h743 板级补丁（2026-09-30）：这几个 BMI270 的 FIFO/INT 寄存器在
+// 本板兼容件（华轩阳 HXY「ICM-42688P」）上【地址根本不存在】（见厂商手册 §4.1 寄存器表：
+// 本片 FIFO 在 0x1C~0x21、中断配置在 0x06/0x07），所以写进去回读恒 0x00 是正常的
+// ——不是"片子没有 FIFO"。兼容件分支下跳过它们的写与检查，避免做无用功。
 static constexpr bool is_fifo_or_int_register(Register reg)
 {
 	switch (reg) {
@@ -249,9 +250,9 @@ void BMI270::print_status()
 
 	PX4_INFO("FIFO empty interval: %d us (%.1f Hz)", _fifo_empty_interval_us, 1e6 / _fifo_empty_interval_us);
 
-	// ★ rm2027/fmu-h743 板级补丁：兼容件走的是轮询数据寄存器的路，不是 FIFO
+	// ★ rm2027/fmu-h743 板级补丁：兼容件走的是"查询方式"轮询数据寄存器（不是 BMI270 的 FIFO 路径）
 	if (_skip_microcode) {
-		PX4_INFO("compatible part: no FIFO, polling data registers 0x0C-0x17 every %u us (%u Hz)",
+		PX4_INFO("compatible part: polling data registers 0x0C-0x17 every %u us (%u Hz)",
 			 (unsigned)POLL_INTERVAL_US, (unsigned)(1000000 / POLL_INTERVAL_US));
 	}
 
@@ -280,6 +281,14 @@ int BMI270::probe()
 		// ★ rm2027/fmu-h743 板级补丁：本板器件是 BMI270 兼容件，CHIP_ID=0x00。
 		//    它不是正品，但寄存器图/功能与 BMI270 一致，只是【不能上传微码】。
 		//    故接受 0x00 并标记"跳过微码"。见开发日志 09。
+		//
+		//    ⚠️ 2026-09-30 拿到厂商手册（华轩阳 HXY「ICM-42688P」）后更正/补强：
+		//       本片器件 ID 寄存器是 WHO_AM_I = 0x01、缺省值 0x6A（手册 §4.1/§5.1），
+		//       0x00 不在手册寄存器表里、读出来是 0x00 —— 正品 BMI270 的 CHIP_ID 在 0x00=0x24，
+		//       本片把它挪到了 0x01。所以更严谨的识别是 RegisterRead(0x01) == 0x6A
+		//       （transfer() 补丁已保证 RegisterRead 返回的就是该地址的内容）。
+		//       但"接受 0x00"这条已在实机上验证可用（驱动能启动、数据能出），
+		//       故本次【不改识别逻辑】，只把更优方案记在这里，等下次上板一并改测。
 		if (CHIP_ID == 0x00) {
 			_skip_microcode = true;
 			PX4_INFO("BMI270-compatible part detected (CHIP_ID=0x00): microcode upload will be SKIPPED");
@@ -417,16 +426,20 @@ void BMI270::RunImpl()
 
 		if (Configure()) {
 
-			// ★★ rm2027/fmu-h743 板级补丁（2026-09-30）：本板兼容件【没有 FIFO】，
+			// ★★ rm2027/fmu-h743 板级补丁（2026-09-30）：本板兼容件走【查询方式】取数，
 			//    Configure() 成功后不走 FIFO_READ，改走 DATA_READ
 			//    （定时轮询、一次性突发读数据寄存器 0x0C~0x17）。
+			//    为什么会走到这一步：BMI270 的 FIFO 寄存器地址(0x46~0x49/0x24~0x26)在本片上
+			//    不存在（厂商手册：本片 FIFO 在 0x1C~0x21），原 FIFO 路径读不到任何东西。
 			//    下面的 FIFO 路径完整保留给正品 BMI270（CHIP_ID=0x24），
 			//    这样以后换回正品芯片时这份驱动不需要回滚代码，只要 _skip_microcode 为 false。
 			if (_skip_microcode) {
 
 				// 【强制走定时器路径，不用 DRDY 中断】：
-				// 这颗兼容件的 INT1 行为未知（INT1_IO_CTRL/INT_MAP_DATA 都写不进去），
-				// 不赌中断能来；Configure() 里也已经跳过这两个寄存器的写入。
+				// BMI270 的 INT1_IO_CTRL(0x53)/INT_MAP_DATA(0x58) 在本片寄存器表里【不存在】，
+				// 厂商手册里中断是 INT_CFG1(0x06)/INT_CFG2(0x07)（INT1_SEL[4:0] 选 DRDY_ACC/
+				// DRDY_GYR…），DRDY 状态位在 DATA_STAT(0x0B)。所以原驱动的中断配置在本片是空操作、
+				// 中断从未被验证过；而手册§描述明确支持"查询方式"取数 ⇒ 老老实实定时轮询，不赌中断。
 				// 故：_data_ready_interrupt_enabled 显式置 false，
 				//     且【不调用】DataReadyInterruptConfigure()。
 				_data_ready_interrupt_enabled = false;
@@ -440,8 +453,9 @@ void BMI270::RunImpl()
 				// （1 kHz < 芯片 1600 Hz ODR ⇒ 只丢样本、不重复样本）
 				ScheduleOnInterval(POLL_INTERVAL_US, POLL_INTERVAL_US);
 
-				// 注意：这里【不】调用 FIFOReset()。FIFOReset 会写 CMD(0x7E)=0xB0，
-				// 兼容件的 CMD 行为未知（同族的 0xB6 软复位已被证实会把片子打哑），不碰。
+				// 注意：这里【不】调用 FIFOReset()。FIFOReset 写的是 CMD(0x7E)=0xB0，
+				// 而本片 0x7E 不在寄存器表里、软复位其实是 SOFT_RST(0x4A)=0xA5；
+				// 对不存在的地址做写操作没有意义，不碰。
 				_state = STATE::DATA_READ;
 				break;
 			}
@@ -484,9 +498,13 @@ void BMI270::RunImpl()
 			//    每个 ScheduleOnInterval 周期（1 ms）一次性突发读 0x0C~0x17 共 12 字节，
 			//    组装成 6 个 int16 后交给 _px4_accel.update() / _px4_gyro.update() 发布。
 			//
-			//    为什么走这条路：本板器件【没有 FIFO】（0x48/0x49 写不进、0x24/0x25 恒 0），
-			//    原 FIFO-only 路径永远拿不到数据，会陷入"失败→Reset→重配置"的死循环。
-			//    数据寄存器 0x0C~0x17 实测是活数据且静止时自洽（见下）。
+			//    为什么走这条路：原 FIFO 路径用的是 BMI270 的 FIFO 地址（配置 0x46~0x49、
+			//    长度 0x24/0x25、数据 0x26），而本片（厂商手册：华轩阳 HXY「ICM-42688P」）
+			//    的 FIFO 在 0x1C~0x21 ⇒ 原路径永远拿不到数据，会陷入
+			//    "失败→Reset→重配置"的死循环。厂商手册明确支持"查询方式"读数据寄存器，
+			//    所以这里按查询方式直接读 0x0C~0x17（实测是活数据且静止时自洽）。
+			//    （本片 FIFO 是存在的，2048 Byte/341 组，默认 By-Pass；以后要省 CPU/不丢样本
+			//      可以再按手册实现一条 FIFO 路径。）
 
 			hrt_abstime timestamp_sample = now;
 
@@ -494,8 +512,8 @@ void BMI270::RunImpl()
 				_failure_count = 0;
 
 				// 周期性回读关键配置寄存器（每秒 1 个，循环），确认配置没被器件丢掉。
-				// 只查兼容件真正会写的 _register_cfg[0..4]：FIFO/INT 那几个写不进去，
-				// 查了只会白白累加 _bad_register_perf。失败只计数、不 Reset
+				// 只查兼容件真正存在且会写的 _register_cfg[0..4]：FIFO/INT 那几个地址
+				// 在本片上不存在，查了只会白白累加 _bad_register_perf。失败只计数、不 Reset
 				// （和原 FIFO 路径的处理一致，原代码里那处 Reset() 本来就是注释掉的）。
 				if (hrt_elapsed_time(&_last_config_check_timestamp) > 1_s) {
 					_last_config_check_timestamp = now;
@@ -748,8 +766,9 @@ bool BMI270::Configure()
 
 	// first set and clear all configured register bits
 	for (const auto &reg_cfg : _register_cfg) {
-		// ★ rm2027/fmu-h743 板级补丁：兼容件没有 FIFO，FIFO_WTM_*/FIFO_CONFIG_*/INT* 写不进去
-		// （实测 0x48/0x49 回读恒 0x00），跳过以免每次 Configure() 都做无用功。
+		// ★ rm2027/fmu-h743 板级补丁：兼容件上 FIFO_WTM_*/FIFO_CONFIG_*/INT* 这些地址
+		// 在本片寄存器表里不存在（厂商手册：FIFO 在 0x1C~0x21、中断在 0x06/0x07），
+		// 跳过以免每次 Configure() 都做无用功。
 		if (_skip_microcode && is_fifo_or_int_register(reg_cfg.reg)) {
 			continue;
 		}
