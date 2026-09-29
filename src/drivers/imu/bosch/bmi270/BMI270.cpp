@@ -268,6 +268,22 @@ void BMI270::RunImpl()
 	switch (_state) {
 	case STATE::RESET:
 
+		// ★ rm2027/fmu-h743 板级补丁（2026-09-30）：兼容件【跳过软复位】。
+		//   0xB6 是 BMI270 的 ACC_SOFTRESET；按数据手册，软复位之后必须【重新上传微码】，
+		//   否则加速度计部分不工作（FIFO 永远为空）。而本板器件禁用微码（上传会锁死），
+		//   于是每 16 ms 一次的 "软复位→无微码→FIFO空→判失败→再软复位" 死循环。
+		//   实测证据：手工把 PWR_CTRL(0x7D) 写成 0x0E（=accel_en|gyr_en|temp_en，与
+		//   本驱动 _register_cfg 里的值一致）后，0x0C~0x17 立即出现实时 accel/gyro 数据，
+		//   全程【没有】上传微码 ⇒ 芯片上电态本来就能出数据，是软复位把它打哑了。
+		//   见 work/spi-fingerprint/（寄存器指纹）与 work/spi-runtime/。
+		if (_skip_microcode) {
+			_reset_timestamp = now;
+			_failure_count = 0;
+			_state = STATE::WAIT_FOR_RESET;
+			ScheduleDelayed(1_ms);
+			break;
+		}
+
 		// 0xB6 is written to the CMD register for a soft reset
 		RegisterWrite(Register::CMD, 0xB6);
 		_reset_timestamp = now;
@@ -663,6 +679,38 @@ bool BMI270::RegisterCheck(const register_config_t &reg_cfg)
 	return success;
 }
 
+// ★★ rm2027/fmu-h743 板级补丁（2026-09-30）：本板器件的 SPI 读【无 dummy 字节】。
+// 详见 BMI270.hpp 中该函数的完整说明，实测记录在 work/spi-runtime/。
+//
+// 线上读帧实际是：[cmd(0x80|reg)] [data0] [data1] ...
+// 而本驱动按 BMI270 手册假设：[cmd] [dummy] [data0] [data1] ...
+// 所以这里把收到的字节整体右移一格、dummy 位置填 0 ——
+// 时钟数不变（send/recv/len 原样交给基类），只重排结果，
+// 于是 RegisterRead / FIFOReadCount / FIFORead / UpdateTemperature 四条读路径全部无需改动。
+int BMI270::transfer(uint8_t *send, uint8_t *recv, unsigned len)
+{
+	// 只拦截"接收 + 读操作"的调用；写操作（bit7=0）和只发不收（recv==nullptr）原样透传。
+	// ★ 必须在调用基类之前判断 send[0]：in-place 调用时 send 就是 recv，会被结果覆盖。
+	const bool is_read_transfer = (send != nullptr) && (recv != nullptr) && (len >= 2)
+				      && ((send[0] & DIR_READ) != 0);
+
+	if (!is_read_transfer) {
+		return SPI::transfer(send, recv, len);
+	}
+
+	const int ret = SPI::transfer(send, recv, len);
+
+	// [b0, d0, d1, ..., d(n-2)]  →  [b0, 0(dummy), d0, d1, ..., d(n-2)]
+	// 倒序搬移，避免覆盖尚未读取的字节。
+	for (int i = (int)len - 1; i >= 2; i--) {
+		recv[i] = recv[i - 1];
+	}
+
+	recv[1] = 0;
+
+	return ret;
+}
+
 uint8_t BMI270::RegisterRead(Register reg)
 {
 	// 6.1.2 SPI interface of accelerometer part
@@ -670,6 +718,8 @@ uint8_t BMI270::RegisterRead(Register reg)
 	// In case of read operations of the accelerometer part, the requested data
 	// is not sent immediately, but instead first a dummy byte is sent, and
 	// after this dummy byte the actual requested register content is transmitted.
+	//   ⚠️ 本板器件【没有】这个 dummy 字节 —— 由上面的 BMI270::transfer() 补丁统一补齐，
+	//      所以这里保持原样即可（cmd[2] 现在就是正确的寄存器内容）。
 	uint8_t cmd[3] {};
 	cmd[0] = static_cast<uint8_t>(reg) | DIR_READ;
 	// cmd[1] dummy byte

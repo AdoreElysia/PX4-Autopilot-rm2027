@@ -103,6 +103,36 @@ private:
 		uint8_t clear_bits{0};
 	};
 
+	/**
+	 * ★★ rm2027/fmu-h743 板级补丁（2026-09-30）：本板 IMU 的 SPI 读时序【没有 dummy 字节】。
+	 *
+	 * PX4 的 BMI270 驱动按 Bosch 数据手册实现读操作：
+	 *     [cmd(0x80|reg)] [dummy] [data...]
+	 * 所以 RegisterRead() 发 3 个字节、取第 3 个（FIFOLengthReadBuffer / FIFOReadBuffer /
+	 * UpdateTemperature 里的 dummy 成员是同一个假设）。
+	 *
+	 * 本板器件的寄存器图与 BMI270 完全吻合（ACC_CONF=0x40 读 0xA8、GYR_CONF=0x42 读 0xA9、
+	 * AUX_CONF=0x44、FIFO_DOWNS=0x45、SENSORTIME=0x18-0x1A、TEMP=0x22/0x23、PWR_CONF/CTRL/CMD
+	 * = 0x7C/0x7D/0x7E，PWR_CTRL=0x0E 后 0x0C-0x17 出现实时数据），属于 BMI270 兼容件；
+	 * 但它的读时序是【地址字节之后立刻就是数据】，没有 dummy：
+	 *     [cmd] [data0] [data1] ...
+	 *
+	 * 实测证据（ST-Link 手工驱动 SPI1 外设寄存器，见 work/spi-fingerprint/run-align.log、
+	 * work/spi-runtime/）：
+	 *   1) 写 0x75=0x11 / 0x76=0x22 / 0x77=0x33，从 0x75 突发读回 → ff 11 22 33
+	 *      ⇒ 第 2 个字节就是 0x75 的内容（若有 dummy，第 2 字节应是 dummy、第 3 字节才是 0x11）
+	 *   2) 3 字节读 0x00 = 0x6a，而 2 字节读 0x01 也 = 0x6a
+	 *      ⇒ 3 字节读的结果等于 R+1 的内容，即整串结果右移一格
+	 *   3) 由此推出：RegisterRead(CHIP_ID=0x00) 实际取到的是 0x01 的内容(0x6a)，
+	 *      probe() 必然失败 → 现象正是 "no instance started (no device on bus?)"。
+	 *
+	 * 这里【集中拦截读操作】：发出的时钟数与原来完全一致（不改变线上时序），
+	 * 只把收到的字节数组右移一格、dummy 位置填 0。这样 BMI270.cpp 里的
+	 * RegisterRead / FIFOReadCount / FIFORead / UpdateTemperature 四条读路径
+	 * 一个字都不用改，写操作（bit7=0）与只发不收的调用原样透传。
+	 */
+	int transfer(uint8_t *send, uint8_t *recv, unsigned len);
+
 	int probe() override;
 
 	bool Reset();
