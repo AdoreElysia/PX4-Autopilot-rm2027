@@ -764,16 +764,46 @@ bool BMI270::Configure()
 	};
 
 
-	// first set and clear all configured register bits
-	for (const auto &reg_cfg : _register_cfg) {
-		// ★ rm2027/fmu-h743 板级补丁：兼容件上 FIFO_WTM_*/FIFO_CONFIG_*/INT* 这些地址
-		// 在本片寄存器表里不存在（厂商手册：FIFO 在 0x1C~0x21、中断在 0x06/0x07），
-		// 跳过以免每次 Configure() 都做无用功。
-		if (_skip_microcode && is_fifo_or_int_register(reg_cfg.reg)) {
-			continue;
+	// ★ rm2027/fmu-h743 板级修正（2026-09-30）：厂商手册 5.45 PWR_CTRL(7Dh) 的备注明确要求
+	//   「0x7D 要先写入 0x0E 并延时 10ms 之后再进行其他配置。另外，在配置完寄存器后建议
+	//    延时 1ms 再进行寄存器读取操作。」
+	//   upstream 是一口气把全部寄存器写完的，这两条时序都没满足。
+	//   ⇒ 兼容件（_skip_microcode）按手册的顺序来；正品 BMI270 仍走 upstream 原路径，
+	//     避免在上游已验证的行为上引入回归。
+	if (_skip_microcode) {
+
+		// 1) 先写 PWR_CONF，再写 PWR_CTRL = 0x0E（accel_en|gyr_en|temp_en）
+		RegisterSetAndClearBits(Register::PWR_CONF, 0, ACC_PWR_CONF_BIT::acc_pwr_save);
+		RegisterSetAndClearBits(Register::PWR_CTRL,
+					PWR_CTRL_BIT::accel_en | PWR_CTRL_BIT::gyr_en | PWR_CTRL_BIT::temp_en, 0);
+
+		// 2) 手册要求：写完 0x0E 延时 10ms 再配其它
+		px4_usleep(10_ms);
+
+		// 3) 其余配置。跳过已写过的 PWR_CONF/PWR_CTRL，以及本片寄存器表里不存在的
+		//    FIFO_* / INT_* 地址（厂商手册：FIFO 在 0x1C~0x21、中断在 0x06/0x07，
+		//    而本表用的是 BMI270 的 0x46~0x49 / 0x53 / 0x58）。
+		for (const auto &reg_cfg : _register_cfg) {
+			if (reg_cfg.reg == Register::PWR_CONF || reg_cfg.reg == Register::PWR_CTRL) {
+				continue;
+			}
+
+			if (is_fifo_or_int_register(reg_cfg.reg)) {
+				continue;
+			}
+
+			RegisterSetAndClearBits(reg_cfg.reg, reg_cfg.set_bits, reg_cfg.clear_bits);
 		}
 
-		RegisterSetAndClearBits(reg_cfg.reg, reg_cfg.set_bits, reg_cfg.clear_bits);
+		// 4) 手册要求：配完延时 1ms 再回读
+		px4_usleep(1_ms);
+
+	} else {
+
+		// first set and clear all configured register bits
+		for (const auto &reg_cfg : _register_cfg) {
+			RegisterSetAndClearBits(reg_cfg.reg, reg_cfg.set_bits, reg_cfg.clear_bits);
+		}
 	}
 
 	// now check that all are configured
@@ -1170,7 +1200,13 @@ void BMI270::UpdateTemperature()
 		return;
 	}
 
-	const uint16_t temp = temperature_buf[2] | (temperature_buf[3] << 8);
+	// ★ rm2027/fmu-h743 板级更正（2026-09-30）：厂商手册 5.22 TEMP_H(22h)/TEMP_L(23h) 写明
+	//   `T = (signed short)((X_H << 8) | X_L) / 512 + 23℃`
+	//   —— 高字节在前。upstream 这里写成了 `buf[2] | (buf[3] << 8)`，高低字节反了
+	//   （正品 BMI270 恰好也是高字节在前，所以这是 upstream 既有 bug，不是本板特有）。
+	//   注：temperature_buf[2]/[3] 分别是 0x22/0x23 的内容，这一步已经被 BMI270::transfer()
+	//   的无-dummy 补丁处理过，所以下标 2/3 对应寄存器 0x22/0x23 是对的。
+	const uint16_t temp = (temperature_buf[2] << 8) | temperature_buf[3];
 
 	float temperature;
 
