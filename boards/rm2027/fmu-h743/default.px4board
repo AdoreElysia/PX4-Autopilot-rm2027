@@ -4,9 +4,33 @@ CONFIG_BOARD_SERIAL_TEL1="/dev/ttyS2"   # USART3（本板唯一空闲串口）
 CONFIG_DRIVERS_ADC_BOARD_ADC=y
 CONFIG_DRIVERS_BAROMETER_GOERTEK_SPA06=y
 CONFIG_DRIVERS_DSHOT=y
-CONFIG_DRIVERS_IMU_INVENSENSE_ICM42688P=y
+# --- IMU（SPI1 / CS=PB4）-----------------------------------------------------
+# ★ 2026-09-30：原理图标 ICM-42688-P，但实物不实现 42688-P 的寄存器图（06 号日志）。
+#   型号未知 ⇒ 一次把"135 脚 2.5×3mm LGA 封装"这一档的常见 SPI IMU 都编进来，
+#   好让用户在 QGC 里逐个 `start` 试（清单见 开发日志/08-*.md）。
+#   ⚠️ 硬上限：这些驱动要同时在 src/spi.cpp 里登记 devtype，
+#      而 SPI_BUS_MAX_DEVICES == 6（platforms/common/include/px4_platform_common/spi.h:54，**不可覆盖**）
+#      ⇒ SPI1 上最多只能挂 6 个型号。当前就是 6 个（下面 6 行 + spi.cpp 里对应 6 行），已满。
+CONFIG_DRIVERS_IMU_INVENSENSE_ICM42688P=y   # 原理图标的（实测 probe 失败）
+CONFIG_DRIVERS_IMU_INVENSENSE_ICM42605=y    # 0x75/0x42
+CONFIG_DRIVERS_IMU_INVENSENSE_ICM42670P=y   # 0x75/0x67
+CONFIG_DRIVERS_IMU_INVENSENSE_ICM45686=y    # 0x72/0xE9（ID 寄存器都不同）
+CONFIG_DRIVERS_IMU_BOSCH_BMI270=y           # 0x00/0x24（Bosch，首读需 dummy）
+CONFIG_DRIVERS_IMU_ST_LSM6DSV=y             # 0x0F/0x70（含 LSM6DSV16X）
+# 被"6 个槽位"挤掉、想换的话把上面任意一行换成下面一行即可（同时改 src/spi.cpp）：
+#   CONFIG_DRIVERS_IMU_INVENSENSE_MPU6000=y     # 0x75/0x68，但封装是 QFN24 4×4 ≠ 本板 14 脚 LGA
+#   CONFIG_DRIVERS_IMU_INVENSENSE_ICM20602=y    # 0x75/0x12，封装 16 脚 3×3 ≠ 本板 14 脚 LGA
+#   CONFIG_DRIVERS_IMU_INVENSENSE_ICM40609D=y   # 0x75/0x3B
+#   CONFIG_DRIVERS_IMU_BOSCH_BMI088=y           # 需要 2 条 CS（本板只有 PB4 一条）⇒ 不可能
+#   CONFIG_DRIVERS_IMU_INVENSENSE_IIM42652=y    # 0x75/0x6F（车规版 42688）
+# --- 磁罗盘 -------------------------------------------------------------------
 CONFIG_COMMON_MAGNETOMETER=y
-CONFIG_DRIVERS_MAGNETOMETER_ISENTEK_IST8310=y
+# ★ 2026-09-30 实测：实物是 Voltafield AF9838 @I2C4 0x0C，不是 IST8310 @0x0E。
+# 注意：CONFIG_COMMON_MAGNETOMETER=y 会 `select` 全部磁罗盘驱动
+#       （src/drivers/magnetometer/Kconfig 里 AF9838/IST8310 都在 select 列表里）
+#       ⇒ 这两颗**都会**被编进固件，`ist8310` 命令依然存在（敲了会 ERROR，正常）。
+#       本行只是"显式声明板载件"，让配置自解释；删掉它 AF9838 也照样能编进去。
+CONFIG_DRIVERS_MAGNETOMETER_VOLTAFIELD_AF9838=y
 CONFIG_DRIVERS_PWM_OUT=y
 CONFIG_DRIVERS_RC_INPUT=y
 CONFIG_COMMON_TELEMETRY=y

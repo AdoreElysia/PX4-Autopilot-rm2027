@@ -7,30 +7,53 @@
 #
 # ⚠️ 跨端提醒：本文件是 Linux/NuttX 侧执行的 shell 脚本，行尾必须是 LF。
 #
+# ★★★ 2026-09-30 实测确认（用户在 QGC MAVLink Console 逐条敲出来的，不是猜的）★★★
+#
+#   磁罗盘 = Voltafield AF9838（**不是**原理图写的 IST8310），I2C4，7bit 地址 0x0C
+#       af9838  -I -b 4 start            → af9838 #0 on I2C bus 4 address 0xC   ✅
+#       ist8310 -I -b 4 start            → ERROR（IST8310 在 0x0E，本板无）      ❌
+#       ist8308 -I -b 4 start            → ERROR                                ❌
+#       ak09916 / ak8963 -I -b 4 start   → ERROR                                ❌
+#     依据：0x0C 正好是 AF9838 的默认 7bit 地址（af9838_main.cpp 里 I2C_ADDRESS(0x0C)），
+#           而 IST8310/IST8308 都是 0x0E ⇒ 「图纸写 IST8310、实物焊 AF9838」。
+#
+#   气压计 = Goertek SPA06，I2C2，7bit 地址 0x77（驱动默认 0x76 ⇒ 必须显式 -a）
+#       spa06 -I -b 2 -a 0x77 start      → spa06 #0 on I2C bus 2 address 0x77   ✅
+#
+#   IMU    = **仍未知**。原理图标 ICM-42688-P，但实物不实现 ICM-42688-P 的寄存器图
+#           （0x75 可读可写、复位读 0x00 —— 真 ICM-42688-P 的 0x75 是只读 WHO_AM_I 且必须 0x47）。
+#           既然磁罗盘已经证明「实物 ≠ 图纸」，IMU 大概率也不是 42688-P。
+#           取证工具与候选清单见 开发日志/08-*.md
+#           （命令行：`rm2027_spiid` —— **只读**地把那颗片 0x00~0x7F 全 dump 出来）
+#
 # 引脚依据：firmware/fmu-h743/引脚映射-H743.md（原理图 V1.0 直读）
-#   ICM-42688-P  SPI1
-#   IST8310      I2C4  (PD12/PD13)
-#   SPA06-003    I2C2  (PB10/PB11)
+#   引脚经用户人工复核 100% 正确 —— 问题在**型号**，不在引脚。
+#     IMU(?)       SPI1  SCK=PB3  MISO=PA6  MOSI=PD7  CS=PB4  DRDY=PD6
+#     AF9838       I2C4  SCL=PD12 SDA=PD13            @0x0C
+#     SPA06-003    I2C2  SCL=PB10 SDA=PB11            @0x77
 #------------------------------------------------------------------------------
 
 board_adc start
 
-# IMU: ICM-42688-P on SPI1, CS=PB4(GYRO_CS), DRDY=PD6(GYRO_INT1)
+# IMU: 原理图标 ICM-42688-P on SPI1, CS=PB4(GYRO_CS), DRDY=PD6(GYRO_INT1)
+# ⚠️ 型号待定（见文件头）。这行**先原样保留**：等 `rm2027_spiid` 读出真实 ID 再换成对应驱动。
 # TODO(上板核对): -R 旋转值取决于 IMU 在 PCB 上的贴装方向，现按 0 占位。
-#                 上板后可先用 QGC 的传感器方向检查，再回填此处。
 icm42688p -s -b 1 -R 0 start
 
-# 磁罗盘: IST8310 on I2C4 (PD12/PD13)
+# 磁罗盘: Voltafield AF9838 on I2C4 (PD12/PD13), 7bit 地址 0x0C
+# ★ 实测确认（2026-09-30）：打成 af9838 才起得来；ist8310/ist8308 都起不来。
 # ★ 必须是 -I（internal），不能是 -X（external）：
 #   src/i2c.cpp 里 I2C4 是用 initI2CBusInternal(4) 声明的（板载器件）。
 #   PX4 的 I2CBusIterator 在 -X 时只遍历 topology != Internal 的总线
 #   （platforms/common/i2c.cpp: FilterType::ExternalBus + bus_topology_has_external），
 #   本板一条 external/shared I2C 总线都没有 ⇒ 循环体一次都不执行
-#   ⇒ 直接报 "ist8310: no instance started (no device on bus?)"，
-#   **根本没碰过 I2C4、也没 probe 过 IST8310**。
+#   ⇒ 直接报 "no instance started (no device on bus?)"，**根本没碰过 I2C4**。
 #   旁证：只有 -X 这条路会打印 WARN（platforms/common/i2c_spi_buses.cpp:766-772），
-#   -I/-s 打的是 ERROR —— 现场 ist8310 报的正是 WARN。
-ist8310 -I -b 4 -R 0 start
+#   -I 打的是 ERROR —— 现场 ist8310 报的正是 WARN。
+# ★ 不要改回 ist8310：图纸是错的，实物是 AF9838（0x0E vs 0x0C）。
+af9838 -I -b 4 -R 0 start
 
 # 气压计: SPA06-003 on I2C2 (PB10/PB11)
-spa06 -I -b 2 start
+# ★ 实测确认（2026-09-30）：器件在 0x77，而驱动默认 0x76 ⇒ **必须显式 -a 0x77**，
+#   否则 probe 会去问 0x76、拿 NACK，报 "no instance started"。
+spa06 -I -b 2 -a 0x77 start
