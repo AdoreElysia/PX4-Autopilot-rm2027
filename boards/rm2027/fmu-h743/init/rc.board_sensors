@@ -20,11 +20,21 @@
 #   气压计 = Goertek SPA06，I2C2，7bit 地址 0x77（驱动默认 0x76 ⇒ 必须显式 -a）
 #       spa06 -I -b 2 -a 0x77 start      → spa06 #0 on I2C bus 2 address 0x77   ✅
 #
-#   IMU    = **仍未知**。原理图标 ICM-42688-P，但实物不实现 ICM-42688-P 的寄存器图
-#           （0x75 可读可写、复位读 0x00 —— 真 ICM-42688-P 的 0x75 是只读 WHO_AM_I 且必须 0x47）。
-#           既然磁罗盘已经证明「实物 ≠ 图纸」，IMU 大概率也不是 42688-P。
-#           取证工具与候选清单见 开发日志/08-*.md
-#           （命令行：`rm2027_spiid` —— **只读**地把那颗片 0x00~0x7F 全 dump 出来）
+#   IMU    = ★ 已取证（2026-09-30，见 开发日志/09-IMU寄存器指纹.md）：
+#           **BMI270 寄存器图兼容件**（不是 42688-P，也不是 QMI8658）。
+#           证据：SENSORTIME@0x18-0x1A 活计时器、EVENT@0x1B、TEMP@0x22/0x23、
+#                 ACC_CONF@0x40=0xA8、GYR_CONF@0x42=0xA9、AUX_CONF@0x44=0x46、
+#                 FIFO_DOWNS@0x45=0x88、PWR_CONF/PWR_CTRL/CMD@0x7C/0x7D/0x7E
+#                 —— 逐条吻合 Bosch 官方寄存器图；
+#           功能铁证：按 BMI270 写法 PWR_CTRL(0x7D)=0x0E ⇒ 0x0C~0x17 立刻出活的加速度/陀螺数据，
+#                 写回 0 立刻冻结 ⇒ 寄存器图 + 功能 双向吻合。
+#           唯一异常：CHIP_ID(0x00) 读 0x00，而正品 BMI270 必须是 0x24 ⇒ PX4 驱动拒启。
+#           ⚠️⚠️ 【不要】只放宽 PX4 bmi270 驱动的 ID 检查：那会放出它的"微码上传"步骤
+#                 （写 INIT_CTRL(0x59)/INIT_DATA(0x5E) 上传 329 字节配置块），
+#                 实测会把这颗片【锁死】（读全 0xFF），只能靠断电恢复。
+#                 正确方向是"跳过微码上传"的驱动（已证明不上传微码也能出数据）。
+#           取证工具（openocd 脚本）在 work/spi-fingerprint/ —— **只读取证优先**；
+#                 对未知器件的写测试（尤其 0x59/0x5E 配置上传端口）必须先经 Lead/用户同意。
 #
 # 引脚依据：firmware/fmu-h743/引脚映射-H743.md（原理图 V1.0 直读）
 #   引脚经用户人工复核 100% 正确 —— 问题在**型号**，不在引脚。
@@ -35,8 +45,10 @@
 
 board_adc start
 
-# IMU: 原理图标 ICM-42688-P on SPI1, CS=PB4(GYRO_CS), DRDY=PD6(GYRO_INT1)
-# ⚠️ 型号待定（见文件头）。这行**先原样保留**：等 `rm2027_spiid` 读出真实 ID 再换成对应驱动。
+# IMU: 实物 = BMI270 寄存器图兼容件 on SPI1, CS=PB4(GYRO_CS), DRDY=PD6(GYRO_INT1)（见文件头）
+# ⚠️ 型号已定，但驱动还没改：现有 bmi270 驱动会因 CHIP_ID=0x00 拒启，
+#    而只放宽 ID 检查会让它上传微码把片子锁死 ⇒ 需先改造成"跳过微码"的驱动（方案待 Lead 定）。
+#    这一行暂时保留原驱动名，等驱动改造完再换成 bmi270（并同步改 default.px4board / src/spi.cpp）。
 # TODO(上板核对): -R 旋转值取决于 IMU 在 PCB 上的贴装方向，现按 0 占位。
 icm42688p -s -b 1 -R 0 start
 
