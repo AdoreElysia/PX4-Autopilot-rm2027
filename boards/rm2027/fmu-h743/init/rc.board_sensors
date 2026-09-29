@@ -21,7 +21,16 @@ board_adc start
 icm42688p -s -b 1 -R 0 start
 
 # 磁罗盘: IST8310 on I2C4 (PD12/PD13)
-ist8310 -X -b 4 -R 0 start
+# ★ 必须是 -I（internal），不能是 -X（external）：
+#   src/i2c.cpp 里 I2C4 是用 initI2CBusInternal(4) 声明的（板载器件）。
+#   PX4 的 I2CBusIterator 在 -X 时只遍历 topology != Internal 的总线
+#   （platforms/common/i2c.cpp: FilterType::ExternalBus + bus_topology_has_external），
+#   本板一条 external/shared I2C 总线都没有 ⇒ 循环体一次都不执行
+#   ⇒ 直接报 "ist8310: no instance started (no device on bus?)"，
+#   **根本没碰过 I2C4、也没 probe 过 IST8310**。
+#   旁证：只有 -X 这条路会打印 WARN（platforms/common/i2c_spi_buses.cpp:766-772），
+#   -I/-s 打的是 ERROR —— 现场 ist8310 报的正是 WARN。
+ist8310 -I -b 4 -R 0 start
 
 # 气压计: SPA06-003 on I2C2 (PB10/PB11)
 spa06 -I -b 2 start
