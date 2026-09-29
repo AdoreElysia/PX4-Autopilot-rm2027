@@ -41,6 +41,32 @@ static constexpr int16_t combine(uint8_t msb, uint8_t lsb)
 	return (msb << 8u) | lsb;
 }
 
+// ★ rm2027/fmu-h743 板级补丁（2026-09-30）：原 ProcessAccel/ProcessGyro 做 FLU→FRD
+// （y、z 取反）时用 `(v == INT16_MIN) ? INT16_MAX : -v` 防溢出，轮询路径保持一致。
+static constexpr int16_t negate_clamped(int16_t v)
+{
+	return (v == INT16_MIN) ? INT16_MAX : -v;
+}
+
+// ★ rm2027/fmu-h743 板级补丁（2026-09-30）：本板兼容件没有 FIFO、INT 行为未知，
+// _register_cfg 里这几个寄存器在兼容件上写不进去（实测 0x48/0x49 回读恒 0x00），
+// 兼容件分支下跳过它们的写与检查，避免做无用功。
+static constexpr bool is_fifo_or_int_register(Register reg)
+{
+	switch (reg) {
+	case Register::FIFO_WTM_0:
+	case Register::FIFO_WTM_1:
+	case Register::FIFO_CONFIG_0:
+	case Register::FIFO_CONFIG_1:
+	case Register::INT1_IO_CTRL:
+	case Register::INT_MAP_DATA:
+		return true;
+
+	default:
+		return false;
+	}
+}
+
 /**
 * The following device config microcode has the following copyright:
 *
@@ -223,6 +249,12 @@ void BMI270::print_status()
 
 	PX4_INFO("FIFO empty interval: %d us (%.1f Hz)", _fifo_empty_interval_us, 1e6 / _fifo_empty_interval_us);
 
+	// ★ rm2027/fmu-h743 板级补丁：兼容件走的是轮询数据寄存器的路，不是 FIFO
+	if (_skip_microcode) {
+		PX4_INFO("compatible part: no FIFO, polling data registers 0x0C-0x17 every %u us (%u Hz)",
+			 (unsigned)POLL_INTERVAL_US, (unsigned)(1000000 / POLL_INTERVAL_US));
+	}
+
 	perf_print_counter(_bad_register_perf);
 	perf_print_counter(_bad_transfer_perf);
 	perf_print_counter(_fifo_empty_perf);
@@ -340,7 +372,13 @@ void BMI270::RunImpl()
 			//    实测上传 329 字节微码会把该器件锁死（此后读全 0xFF，只能断电恢复）。
 			//    已证明不上传微码它照样能出数据（PWR_CTRL=0x0E → 0x0C~0x17 有活数据）。
 			if (_skip_microcode) {
-				PX4_INFO("Skipping BMI270 microcode upload (compatible part)");
+				// 只打印第一次：兼容件每次 Reset 都会重新走到这里，
+				// 每次都 PX4_INFO 会刷满 console 环形缓冲区。
+				if (!_microcode_skip_logged) {
+					PX4_INFO("Skipping BMI270 microcode upload (compatible part)");
+					_microcode_skip_logged = true;
+				}
+
 				_state = STATE::CONFIGURE;
 				ScheduleDelayed(1_ms);
 				break;
@@ -379,6 +417,35 @@ void BMI270::RunImpl()
 
 		if (Configure()) {
 
+			// ★★ rm2027/fmu-h743 板级补丁（2026-09-30）：本板兼容件【没有 FIFO】，
+			//    Configure() 成功后不走 FIFO_READ，改走 DATA_READ
+			//    （定时轮询、一次性突发读数据寄存器 0x0C~0x17）。
+			//    下面的 FIFO 路径完整保留给正品 BMI270（CHIP_ID=0x24），
+			//    这样以后换回正品芯片时这份驱动不需要回滚代码，只要 _skip_microcode 为 false。
+			if (_skip_microcode) {
+
+				// 【强制走定时器路径，不用 DRDY 中断】：
+				// 这颗兼容件的 INT1 行为未知（INT1_IO_CTRL/INT_MAP_DATA 都写不进去），
+				// 不赌中断能来；Configure() 里也已经跳过这两个寄存器的写入。
+				// 故：_data_ready_interrupt_enabled 显式置 false，
+				//     且【不调用】DataReadyInterruptConfigure()。
+				_data_ready_interrupt_enabled = false;
+
+				// 清掉可能残留的失败计数/配置检查游标，避免带着上一次循环的状态进入新路
+				_failure_count = 0;
+				_checked_register = 0;
+				_last_config_check_timestamp = now;
+
+				// 轮询周期 1 ms（1 kHz）：见 POLL_INTERVAL_US 的说明
+				// （1 kHz < 芯片 1600 Hz ODR ⇒ 只丢样本、不重复样本）
+				ScheduleOnInterval(POLL_INTERVAL_US, POLL_INTERVAL_US);
+
+				// 注意：这里【不】调用 FIFOReset()。FIFOReset 会写 CMD(0x7E)=0xB0，
+				// 兼容件的 CMD 行为未知（同族的 0xB6 软复位已被证实会把片子打哑），不碰。
+				_state = STATE::DATA_READ;
+				break;
+			}
+
 			// if configure succeeded then start reading from FIFO
 
 			if (DataReadyInterruptConfigure()) {
@@ -407,6 +474,60 @@ void BMI270::RunImpl()
 			}
 
 			ScheduleDelayed(100_ms);
+		}
+
+		break;
+
+	case STATE::DATA_READ: {
+
+			// ★★ rm2027/fmu-h743 板级补丁（2026-09-30）：兼容件专用取数路径 ——
+			//    每个 ScheduleOnInterval 周期（1 ms）一次性突发读 0x0C~0x17 共 12 字节，
+			//    组装成 6 个 int16 后交给 _px4_accel.update() / _px4_gyro.update() 发布。
+			//
+			//    为什么走这条路：本板器件【没有 FIFO】（0x48/0x49 写不进、0x24/0x25 恒 0），
+			//    原 FIFO-only 路径永远拿不到数据，会陷入"失败→Reset→重配置"的死循环。
+			//    数据寄存器 0x0C~0x17 实测是活数据且静止时自洽（见下）。
+
+			hrt_abstime timestamp_sample = now;
+
+			if (DataReadPublish(timestamp_sample)) {
+				_failure_count = 0;
+
+				// 周期性回读关键配置寄存器（每秒 1 个，循环），确认配置没被器件丢掉。
+				// 只查兼容件真正会写的 _register_cfg[0..4]：FIFO/INT 那几个写不进去，
+				// 查了只会白白累加 _bad_register_perf。失败只计数、不 Reset
+				// （和原 FIFO 路径的处理一致，原代码里那处 Reset() 本来就是注释掉的）。
+				if (hrt_elapsed_time(&_last_config_check_timestamp) > 1_s) {
+					_last_config_check_timestamp = now;
+
+					if (!RegisterCheck(_register_cfg[_checked_register % size_register_cfg_compat])) {
+						perf_count(_bad_register_perf);
+					}
+
+					_checked_register = (_checked_register + 1) % size_register_cfg_compat;
+
+					_px4_accel.set_error_count(perf_event_count(_bad_register_perf) + perf_event_count(_bad_transfer_perf));
+					_px4_gyro.set_error_count(perf_event_count(_bad_register_perf) + perf_event_count(_bad_transfer_perf));
+				}
+
+			} else {
+				_failure_count++;
+
+				// 连续失败就做一次完整 Reset（Reset() 会 ScheduleClear() 再 ScheduleNow()，
+				// 不会残留 interval、也不会有第二个调度源 ⇒ 不会死循环刷屏；
+				// 日志一律 PX4_DEBUG，release 构建里根本不输出）。
+				if (_failure_count > 10) {
+					PX4_DEBUG("data register read failed %d times, resetting...", _failure_count);
+					Reset();
+					return;
+				}
+			}
+
+			// 约 1 Hz 更新一次温度（照抄原 FIFO_READ 尾部的写法）
+			if (hrt_elapsed_time(&_temperature_update_timestamp) >= 1_s) {
+				UpdateTemperature();
+				_temperature_update_timestamp = now;
+			}
 		}
 
 		break;
@@ -516,25 +637,31 @@ void BMI270::SetAccelScaleAndRange()
 {
 	const uint8_t ACC_RANGE = RegisterRead(Register::ACC_RANGE) & (Bit1 | Bit0);
 
+	// ★ rm2027/fmu-h743 板级补丁（2026-09-30）：兼容件的加速度计绝对灵敏度比手册低 ~1.73x
+	//   （实测：ACC_RANGE=0x03 时静止 1g 只读到 1185 counts，手册应为 2048 counts/g；
+	//    0x00/0x01/0x02 分别是 9289.5/4648/2316，严格 8:4:2:1 ⇒ 只有绝对增益偏小）。
+	//   这里乘上实测修正，使静止合矢量 = 1g。正品芯片（_skip_microcode == false）不受影响。
+	const float gain_correction = _skip_microcode ? ACCEL_COMPAT_GAIN_CORRECTION : 1.f;
+
 	switch (ACC_RANGE) {
 	case acc_range_2g:
-		_px4_accel.set_scale(2.f * CONSTANTS_ONE_G / 32768.f);
-		_px4_accel.set_range(2.f * CONSTANTS_ONE_G);
+		_px4_accel.set_scale(2.f * CONSTANTS_ONE_G / 32768.f * gain_correction);
+		_px4_accel.set_range(2.f * CONSTANTS_ONE_G * gain_correction);
 		break;
 
 	case acc_range_4g:
-		_px4_accel.set_scale(4.f * CONSTANTS_ONE_G / 32768.f);
-		_px4_accel.set_range(4.f * CONSTANTS_ONE_G);
+		_px4_accel.set_scale(4.f * CONSTANTS_ONE_G / 32768.f * gain_correction);
+		_px4_accel.set_range(4.f * CONSTANTS_ONE_G * gain_correction);
 		break;
 
 	case acc_range_8g:
-		_px4_accel.set_scale(8.f * CONSTANTS_ONE_G / 32768.f);
-		_px4_accel.set_range(8.f * CONSTANTS_ONE_G);
+		_px4_accel.set_scale(8.f * CONSTANTS_ONE_G / 32768.f * gain_correction);
+		_px4_accel.set_range(8.f * CONSTANTS_ONE_G * gain_correction);
 		break;
 
 	case acc_range_16g:
-		_px4_accel.set_scale(16.f * CONSTANTS_ONE_G / 32768.f);
-		_px4_accel.set_range(16.f * CONSTANTS_ONE_G);
+		_px4_accel.set_scale(16.f * CONSTANTS_ONE_G / 32768.f * gain_correction);
+		_px4_accel.set_range(16.f * CONSTANTS_ONE_G * gain_correction);
 		break;
 	}
 }
@@ -598,22 +725,39 @@ bool BMI270::Configure()
 		PX4_DEBUG("INTERNAL_STATUS 0x01, ready for configure");
 
 	} else {
+		// ★ rm2027/fmu-h743 板级补丁（2026-09-30）：兼容件的 INTERNAL_STATUS(0x21) 恒读 0x00
+		// （它是"微码已加载/自检完成"的状态位，而兼容件根本没有微码），
+		// 走这个分支只会白白把 _state 置成 RESET（虽然随后被调用方覆盖）。
+		// 兼容件下忽略这个检查，理由与"跳过微码上传"一致。
+		if (_skip_microcode) {
+			PX4_DEBUG("compatible part: ignoring INTERNAL_STATUS check");
 
-		PX4_DEBUG("INTERNAL_STATUS check failed, resetting");
-		_state = STATE::RESET;
-		ScheduleDelayed(10_ms);
-
+		} else {
+			PX4_DEBUG("INTERNAL_STATUS check failed, resetting");
+			_state = STATE::RESET;
+			ScheduleDelayed(10_ms);
+		}
 	};
 
 
 	// first set and clear all configured register bits
 	for (const auto &reg_cfg : _register_cfg) {
+		// ★ rm2027/fmu-h743 板级补丁：兼容件没有 FIFO，FIFO_WTM_*/FIFO_CONFIG_*/INT* 写不进去
+		// （实测 0x48/0x49 回读恒 0x00），跳过以免每次 Configure() 都做无用功。
+		if (_skip_microcode && is_fifo_or_int_register(reg_cfg.reg)) {
+			continue;
+		}
+
 		RegisterSetAndClearBits(reg_cfg.reg, reg_cfg.set_bits, reg_cfg.clear_bits);
 	}
 
 	// now check that all are configured
 
 	for (const auto &reg_cfg : _register_cfg) {
+		if (_skip_microcode && is_fifo_or_int_register(reg_cfg.reg)) {
+			continue;
+		}
+
 		if (!RegisterCheck(reg_cfg)) {
 			success = false;
 		}
@@ -709,6 +853,61 @@ int BMI270::transfer(uint8_t *send, uint8_t *recv, unsigned len)
 	recv[1] = 0;
 
 	return ret;
+}
+
+// ★★ rm2027/fmu-h743 板级补丁（2026-09-30）：兼容件专用 —— 一次性突发读 0x0C~0x17 并发布。
+//
+// 字节序 / 轴向 / 量程的实测结论（依据 work/spi-runtime/ 下的 datadump.tcl、rangetest.tcl、
+// cfgtest.tcl，全部是 ST-Link 手工驱动 SPI1 在 CPU halted 下读到的真机数据）：
+//
+// 1) 字节序 = 【高字节在前 MSB-first】，与 Bosch 手册写的 LSB-first 相反。
+//    判定方法：同一次 CS 内从 0x0C / 0x0D / 0x0E 各起一个窗口读，只有"每轴高字节在前"
+//    这一种解释能让三个窗口都得到物理自洽的小数值（Y≈0、Z≈+1180）。
+//    LSB-first 解释会得到 ±2~3 万的数（>16g，静止不可能）。
+//    例：A(0x0C,12)=FF CB 00 08 04 AD 00 00 00 1E FF FA
+//        B(0x0D,11)=CD 00 5F 04 94 00 01 00 18 FF FC
+//        ⇒ A: X=-53 Y=8 Z=1197 / B: X_LSB=CD Y=95 Z=1172（两窗口同构，自洽）
+//
+// 2) 轴序 = 与 BMI270 寄存器图一致：0x0C..0x11 = ACC X/Y/Z，0x12..0x17 = GYR X/Y/Z
+//    （0x12..0x17 静止时三轴都只有个位数~几十 counts，明显是陀螺仪的零偏噪声，
+//      若是加速度计应该是 ~1180 counts 量级的重力 ⇒ 轴序确认）。
+//
+// 3) 轴向/符号 = 原驱动约定：静止平放时第 3 对（0x10/0x11）读到 +1180 counts ≈ +1g
+//    ⇒ 芯片 +Z 朝上。故这里和原 ProcessAccel/ProcessGyro 一样做 FLU→FRD 的 y、z 取反，
+//    传 (x, -y, -z)。update() 内部还会做 rotate_3f(_rotation, ...)（与 updateFIFO 一致），
+//    再乘 _scale 发布，所以这里【传原始码值】，不要自己乘 scale。
+//    ⚠️ 前提：板子水平正放。若 QGC 里看到的静止 sensor_accel.z 是 +9.8 而不是 -9.8，
+//       说明板/芯片实际是倒放的，需要把符号翻转（见笔记"遗留问题"）。
+//
+// 4) 量程 = ACC_RANGE=0x03（名义 16g）实际只有 ~1185 counts/g，已在
+//    SetAccelScaleAndRange() 里用 ACCEL_COMPAT_GAIN_CORRECTION 做了单点增益标定。
+bool BMI270::DataReadPublish(const hrt_abstime &timestamp_sample)
+{
+	DataReadBuffer buffer{};
+
+	// 注意 len 必须传 sizeof(buffer) == 14（多读 1 个字节），原因见 DataReadBuffer 的声明注释：
+	// 线上返回 13 字节(0x0C..0x18)，transfer() 补丁整体右移一格后 data[0..11] 才是 0x0C..0x17。
+	if (transfer((uint8_t *)&buffer, (uint8_t *)&buffer, sizeof(buffer)) != PX4_OK) {
+		PX4_DEBUG("data register burst transfer failed");
+		perf_count(_bad_transfer_perf);
+		return false;
+	}
+
+	// 0x0C..0x11 = ACC X/Y/Z（高字节在前），0x12..0x17 = GYR X/Y/Z
+	const int16_t accel_x = combine(buffer.data[0], buffer.data[1]);
+	const int16_t accel_y = combine(buffer.data[2], buffer.data[3]);
+	const int16_t accel_z = combine(buffer.data[4], buffer.data[5]);
+
+	const int16_t gyro_x = combine(buffer.data[6], buffer.data[7]);
+	const int16_t gyro_y = combine(buffer.data[8], buffer.data[9]);
+	const int16_t gyro_z = combine(buffer.data[10], buffer.data[11]);
+
+	// FLU → FRD（y、z 取反），与原 ProcessAccel / ProcessGyro 完全一致。
+	// update() 接收的是【原始码值】：内部做 rotate_3f(_rotation,...) 再乘 _scale 发布。
+	_px4_accel.update(timestamp_sample, (float)accel_x, (float)negate_clamped(accel_y), (float)negate_clamped(accel_z));
+	_px4_gyro.update(timestamp_sample, (float)gyro_x, (float)negate_clamped(gyro_y), (float)negate_clamped(gyro_z));
+
+	return true;
 }
 
 uint8_t BMI270::RegisterRead(Register reg)

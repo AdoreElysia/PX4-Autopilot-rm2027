@@ -66,6 +66,24 @@ enum class Register : uint8_t {
 	ERR_REG            = 0x02,
 	STATUS	           = 0x03,
 
+	// ★ rm2027/fmu-h743 板级补丁（2026-09-30）：数据寄存器 0x0C~0x17。
+	// 本板器件没有 FIFO，改为定时一次性突发读这 12 个字节（见 BMI270.cpp 的 STATE::DATA_READ）。
+	// 官方 BMI270 手册写的是 LSB 在前（0x0C=ACC_X_LSB、0x12=GYR_X_LSB），
+	// 【但本板实测是高字节在前（MSB-first）】，实测过程与数据见
+	// work/spi-runtime/实现-轮询读数据寄存器.md 与 BMI270.hpp 里的常量注释。
+	DATA_0             = 0x0C, // ACC_X MSB（实测）
+	DATA_1             = 0x0D, // ACC_X LSB
+	DATA_2             = 0x0E, // ACC_Y MSB
+	DATA_3             = 0x0F, // ACC_Y LSB
+	DATA_4             = 0x10, // ACC_Z MSB
+	DATA_5             = 0x11, // ACC_Z LSB
+	DATA_6             = 0x12, // GYR_X MSB
+	DATA_7             = 0x13, // GYR_X LSB
+	DATA_8             = 0x14, // GYR_Y MSB
+	DATA_9             = 0x15, // GYR_Y LSB
+	DATA_10            = 0x16, // GYR_Z MSB
+	DATA_11            = 0x17, // GYR_Z LSB
+
 	EVENT	           = 0x1B,
 
 	INTERNAL_STATUS    = 0X21,

@@ -73,6 +73,42 @@ private:
 	static constexpr uint32_t RATE{1600}; // 1600 Hz
 	static constexpr float FIFO_SAMPLE_DT{1e6f / RATE};
 
+	// ★★ rm2027/fmu-h743 板级补丁（2026-09-30）：兼容件轮询读数据寄存器的周期 = 1000 us（1 kHz）。
+	//
+	// 为什么是 1 kHz：
+	//   - 芯片 ODR 固定为 accel 1600 Hz / gyro 1600 Hz
+	//     （见 _register_cfg 里的 ACC_CONF.acc_odr_1600 / GYR_CONF.gyr_odr_1k6）。
+	//   - 1 ms = 【PX4 想要的输出频率】（sensor_gyro / sensor_accel 的标准 1 kHz 发布率），
+	//     不是"随手硬编的 1 ms"。
+	//   - 轮询周期(1000 us) ≥ 芯片 ODR 周期(625 us) ⇒ 每两次读之间芯片一定产出过新样本：
+	//     永远不会重复读到同一个样本；因为比 ODR 慢，偶尔会【丢一个样本】。
+	//     丢样本可接受（EKF 只看到 dt 略大），重复样本有害（dt>0 但数值不变 ⇒ 虚假的零角速度）。
+	//   - 【不能】用 _fifo_empty_interval_us(1250 us)：那是 FIFO 批量传输的周期，
+	//     "每周期读一批样本"的语义与"每周期读一个样本"不同。
+	//   - 本驱动所在版本没有 PX4Gyroscope::get_required_data_rate()（只有 get_max_rate_hz()），
+	//     所以不做动态跟随；1 kHz 是保守且够用的选择。
+	static constexpr uint32_t POLL_INTERVAL_US{1000};
+
+	// ★★ rm2027/fmu-h743 板级补丁（2026-09-30）：本板兼容件的加速度计【实测灵敏度修正】。
+	//
+	// 实测（work/spi-runtime/datadump.tcl + rangetest.tcl，板子静止平放、CPU halted）：
+	//   ACC_RANGE 编码 → 静止 1g 对应的原始码值（|a| 均值）：
+	//     0x00 → 9289.5        0x01 → 4648.0
+	//     0x02 → 2316.0        0x03 → 1185.0（PX4 驱动用的就是 0x03 = 名义 16g，手册 2048 counts/g）
+	//   严格 8:4:2:1 阶梯 ⇒ 量程寄存器本身工作正常，只是【绝对灵敏度比手册低 ~1.73x】。
+	//   （1g 静止单点测量无法区分"增益低"与"零偏"——两者在单一加速度下数学等价；
+	//     这里按增益做单点标定，使静止读数 = 1g。用 PX4 六面标定可进一步修偏移/增益。）
+	// 修正系数 = 手册值 / 实测值 = 2048 / 1185 ≈ 1.7283。
+	// 因为阶梯是严格 8:4:2:1，这个系数对 4 个量程都成立，故在 SetAccelScaleAndRange() 里统一相乘。
+	// ⚠️ 只在 _skip_microcode（兼容件）时生效，正品 BMI270 走原公式，不受影响。
+	static constexpr float ACCEL_COMPAT_GAIN_CORRECTION{2048.f / 1185.f};
+
+	// _register_cfg 的前 5 项是本板兼容件【真正能写进去】的寄存器
+	// (PWR_CONF / PWR_CTRL / ACC_CONF / GYR_CONF / ACC_RANGE)；
+	// 之后的 FIFO_WTM_* / FIFO_CONFIG_* / INT1_IO_CTRL / INT_MAP_DATA 在兼容件上写不进去
+	// （实测 0x48/0x49 回读恒 0x00），既不再写、也不参与周期性回读检查。
+	static constexpr uint8_t size_register_cfg_compat{5};
+
 	static constexpr uint8_t ID_088 = 0x1E;
 	static constexpr uint8_t ID_090L = 0x1A;
 
@@ -96,6 +132,26 @@ private:
 
 	// ensure no struct padding
 	static_assert(sizeof(FIFOReadBuffer) == (2 + FIFO_MAX_SAMPLES *sizeof(FIFO::Data)));
+
+	// ★★ rm2027/fmu-h743 板级补丁（2026-09-30）：轮询读数据寄存器 0x0C~0x17 的突发读缓冲。
+	//
+	// ⚠️ 这里的 "dummy" 字节是【给 transfer() 补丁用的】，不是线上的真实时序：
+	//   本板器件读时序无 dummy（线上是 [cmd][D0][D1]...），transfer() 补丁把收到的字节
+	//   整体右移一格并把 recv[1] 置 0，所以本结构体必须按"cmd + dummy + 12 字节数据"声明。
+	//
+	// ⚠️ transfer 的 len 必须传 sizeof(DataReadBuffer) == 14，不能传 13：
+	//   len=14：线上 = [cmd][0x0C..0x18]（13 字节），右移后 buffer[2..13] = 0x0C..0x17 ✓
+	//           ⇒ data[0..11] 正好是 0x0C~0x17
+	//   len=13：线上 = [cmd][0x0C..0x17]（12 字节），右移后 data[11] 被挤出丢掉、
+	//           且 buffer[1] 变成补丁填的 0（dummy 而不是数据）⇒ 少读一个字节 ✗
+	//   （这个 off-by-one 是新路最容易踩的坑，已在实机上验证过补丁的移位语义。）
+	struct DataReadBuffer {
+		uint8_t cmd{static_cast<uint8_t>(Register::DATA_0) | DIR_READ};
+		uint8_t dummy{0};
+		uint8_t data[12] {};  // 0x0C~0x17：ACC X/Y/Z + GYR X/Y/Z，每轴高字节在前
+	};
+
+	static_assert(sizeof(DataReadBuffer) == 14);
 
 	struct register_config_t {
 		Register reg;
@@ -138,6 +194,9 @@ private:
 	bool Reset();
 
 	bool Configure();
+
+	// ★ 兼容件：一次性突发读 0x0C~0x17 并发布 sensor_accel / sensor_gyro
+	bool DataReadPublish(const hrt_abstime &timestamp_sample);
 
 	void ProcessGyro(sensor_gyro_fifo_s *gyro, FIFO::Data *gyro_frame);
 	void ProcessAccel(sensor_accel_fifo_s *accel, FIFO::Data *accel_frame);
@@ -200,13 +259,23 @@ private:
 	// 依据：rm2027-drone/firmware/fmu-h743/开发日志/09-IMU寄存器指纹.md
 	bool _skip_microcode{false};
 
+	// ★ rm2027/fmu-h743 板级补丁（2026-09-30）：兼容件没有 FIFO，取数改走
+	// STATE::DATA_READ（定时轮询直接读 0x0C~0x17）。FIFO 那条路完整保留，
+	// 正品 BMI270（CHIP_ID=0x24）仍然走原来的 FIFO 路径，方便以后换回正品芯片。
+	// 理由：改的是"兼容件专属"的分支，正品路径零改动 ⇒ 换芯片不用回滚代码。
 	enum class STATE : uint8_t {
 		WAIT_FOR_RESET,
 		RESET,
 		MICROCODE_LOAD,
 		CONFIGURE,
-		FIFO_READ,
+		DATA_READ,   // ★ 兼容件专用：定时轮询读数据寄存器（无 FIFO）
+		FIFO_READ,   // 正品 BMI270：原来的 FIFO 批量读路径（本板兼容件不走）
 	} _state{STATE::RESET};
+
+	// "Skipping BMI270 microcode upload" 只打印一次：
+	// 兼容件每次 Reset 都会重新走到 MICROCODE_LOAD，如果每次都 PX4_INFO
+	// 会把 console 环形缓冲区刷满（历史上正是这个刷屏现象掩盖了真正的报错）。
+	bool _microcode_skip_logged{false};
 
 	uint16_t _fifo_empty_interval_us{1250}; // default 1250 us / 800 Hz transfer interval
 	int32_t _fifo_gyro_samples{static_cast<int32_t>(_fifo_empty_interval_us / (1000000 / RATE))}; // checks out to be 2 ...
