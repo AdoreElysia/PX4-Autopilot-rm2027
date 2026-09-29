@@ -362,8 +362,17 @@ void BMI270::RunImpl()
 			PX4_DEBUG("Read from CHIP_ID register and the IDs match (or compatible part)");
 
 			// 1. Disable PWR_CONF.adv_power_save and wait for 450us
+			//
+			// ★ rm2027/fmu-h743（2026-09-30）：兼容件（华轩阳 HXY「ICM-42688P」）的寄存器表里
+			//   【没有 0x7C 这个地址】（表从 0x6D/0x6F 直接跳到 0x7D），而手册 §4.1 明确警告
+			//   "标识为保留的，在使用中不要更改，可能会引起永久性破坏"。
+			//   兼容件分支不写 PWR_CONF —— Configure() 与周期性回读都已经跳过它，
+			//   这里是最后一处漏网的写操作（WAIT_FOR_RESET 每次 Reset 都会走到），一并去掉。
+			//   正品 BMI270 仍照 upstream 写（adv_power_save 是它必须关掉的东西）。
+			if (!_skip_microcode) {
+				RegisterWrite(Register::PWR_CONF, 0x00);
+			}
 
-			RegisterWrite(Register::PWR_CONF, 0x00);
 			_state = STATE::MICROCODE_LOAD;
 			ScheduleDelayed(450_us);
 
