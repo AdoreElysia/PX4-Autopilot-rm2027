@@ -338,7 +338,19 @@ private:
 		{ Register::PWR_CTRL,          PWR_CTRL_BIT::accel_en | PWR_CTRL_BIT::gyr_en | PWR_CTRL_BIT::temp_en,  0 },
 		{ Register::ACC_CONF,              ACC_CONF_BIT::acc_bwp_Normal | ACC_CONF_BIT::acc_odr_1600, Bit1 | Bit0 },
 		{ Register::GYR_CONF,              GYR_CONF_BIT::gyr_odr_1k6 | GYR_CONF_BIT::gyr_flt_mode_normal | GYR_CONF_BIT::gyr_noise_hp | GYR_CONF_BIT::gyr_flt_hp, Bit0 | Bit1 | Bit4},
-		{ Register::ACC_RANGE,             ACC_RANGE_BIT::acc_range_16g, 0 },
+		// ★ rm2027/fmu-h743（2026-09-30）：量程从 ±16g 改成 ±4g。
+		//   依据（厂商手册 §5.38）：FS[1:0] 00=±2G 01=±4G 10=±8G 11=±16G
+		//   ⇒ ±4g = FS=01 = 0x01（原来写的 ACC_RANGE_BIT::acc_range_16g = 0b11 = 0x03 是 ±16g）。
+		//   为什么改：本片实测绝对灵敏度只有手册的约 1/1.73（见 BMI270.hpp 顶部 ACCEL_COMPAT_GAIN_CORRECTION
+		//   的注释），而 PX4 上游为无人机选的 ±16g 是分辨率最差的一档 —— 两个因素叠加后
+		//   静止 1g 只剩 1185 counts。四档实测 9289.5/4648/2316/1185 证明量程切换本身是正常的
+		//   （严格 8:4:2:1），所以换到 ±4g 能把有效分辨率提高 4 倍，对无人机（正常飞行 ±3g 内）够用。
+		//   ⚠️ 换量程会改变 _scale ⇒ 换了必须【重新标定】，旧 CAL_ACC* 立即失效。
+		//   ⚠️⚠️ 必须【同时清除 Bit1】：RegisterSetAndClearBits 是
+		//        val = (orig & ~clearbits) | setbits —— 只 set 不清的话，
+		//        本片 ACC_RANGE 的复位缺省是 0x02(±8g)，(0x02 & ~0) | 0x01 = 0x03 反而成了 ±16g。
+		//        （实测踩过：只改 setbits 而不加 clearbits，读回来仍是 0x03。）
+		{ Register::ACC_RANGE,             ACC_RANGE_BIT::acc_range_4g, Bit1 },
 		{ Register::FIFO_WTM_0,            0, 0 },
 		{ Register::FIFO_WTM_1,            0, 0 },
 		{ Register::FIFO_CONFIG_0,         FIFO_CONFIG_0_BIT::BIT1_ALWAYS | FIFO_CONFIG_0_BIT::FIFO_mode, 0 },
