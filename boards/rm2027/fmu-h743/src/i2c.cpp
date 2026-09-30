@@ -59,9 +59,15 @@
  *     （只读一次 REG_PCODE(0x00) 并检查 I2C 传输成功，读到什么都算过）。
  *     ⇒ 一个不校验 ID 的驱动，把 IST8310 认成了 AF9838。
  *
- *   ⚠️ 当前启动命令仍是 af9838（待切换到 ist8310）。其读数**不可信**，原因见
- *      work/spi-runtime/README.md 的磁罗盘条目：标度 0.1 vs 手册 0.3 µT/LSB、
- *      软复位写 0x11（IST8310 无此寄存器）、自检写 CNTL1=0x09（手册里是 Reserved）。
+ *   ✅ 2026-09-30 晚已切换并实测通过：启动命令 = `ist8310 -I -b 4 -a 0x0C -R 0 start`
+ *      （**必须带 `-a 0x0C`**：IST8310 驱动缺省 0x0E，其 probe() 只在给定地址上读 WAI，
+ *        0x0C~0x0F 那圈只用来写软复位、不用来读；不传 -a 实测报 no instance started）
+ *      实测：device_id Type=0x06 / I2C:4 0x0C，|B| = 0.259 G ⇒ 已落进 lm_mag_fit 窗口 (0.2,0.7)。
+ *
+ *   ⚠️ 之前用 af9838 驱动时的读数是**错的**（|B| 只有 6.9~17.1 µT），三处与手册不符：
+ *        标度 0.1（手册 0.3 µT/LSB）、软复位写 0x11（IST8310 无此寄存器，
+ *        应为 CNTL2(0x0B) bit0 SRST）、自检写 CNTL1=0x09（手册里是 Reserved，
+ *        自检在 STR(0x0C) bit6）。详见 work/spi-runtime/README.md 磁罗盘条目。
  *
  * 总线号 = STM32 外设号（与 matek 模板一致：I2C1→1、I2C2→2）。
  * 两条都是板载器件，故都用 Internal。

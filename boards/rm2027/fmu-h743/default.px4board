@@ -37,13 +37,14 @@ CONFIG_COMMON_MAGNETOMETER=y
 #     §6.4.2 WAI(0x00) Device ID = 0x10
 #     §6.4.4 输出寄存器 = 0x03~0x08
 #     §6.1.1 从机地址表：CAD1=CAD0=VSS ⇒ 7bit = 0CH
-#   待 `ist8310` 实测通过后，把下面那行换成
-#     CONFIG_DRIVERS_MAGNETOMETER_ISENTEK_IST8310=y
+#   实测已通过（2026-09-30 晚）：`ist8310 -I -b 4 -a 0x0C start`
+#     → device_id Type=0x06(DRV_MAG_DEVTYPE_IST8310) / I2C:4 0x0C，|B|=0.259 G
+#       （probe 校验 WAI==0x10 通过 ⇒ 身份坐实；|B| 已在标定窗口 (0.2,0.7) 内）
+#   ⚠️ 必须显式给 `-a 0x0C`：IST8310 驱动缺省 0x0E，而 0x0C~0x0F 那圈只写软复位、不读。
 # 注意：CONFIG_COMMON_MAGNETOMETER=y 会 `select` 全部磁罗盘驱动
 #       （src/drivers/magnetometer/Kconfig 里 AF9838/IST8310 都在 select 列表里）
-#       ⇒ 两颗都会编进固件，`ist8310` 命令可以直接在控制台敲（**不用重编就能试**）。
-#       本行只是"显式声明板载件"，让配置自解释。
-CONFIG_DRIVERS_MAGNETOMETER_VOLTAFIELD_AF9838=y
+#       ⇒ 两颗都会编进固件。本行只是"显式声明板载件"，让配置自解释。
+CONFIG_DRIVERS_MAGNETOMETER_ISENTEK_IST8310=y
 CONFIG_DRIVERS_PWM_OUT=y
 CONFIG_DRIVERS_RC_INPUT=y
 CONFIG_COMMON_TELEMETRY=y

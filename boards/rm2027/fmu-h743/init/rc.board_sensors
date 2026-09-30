@@ -20,8 +20,12 @@
 #           -X 下不遍历 Internal 总线 ⇒ **根本没碰过 I2C4**，那次测试无效。
 #        ⇒ 而 af9838.cpp 的 probe() **不校验 ID**（只确认 I2C 有应答）⇒ 它把 IST8310 认成了 AF9838。
 #       af9838  -I -b 4 start            → 起得来，但读数是错的（标度/复位/自检三处与手册不符）
-#       ist8310 -I -b 4 start            → 待实测（切换目标，见 README 磁罗盘条目）
-#     ⚠️ 当前下面那一行仍写 af9838 —— 等 ist8310 实测通过后再改（需重编重烧）。
+#       ist8310 -I -b 4 -a 0x0C start    → ✅ 起来了 ⇒ probe 读到 WAI==0x10 ⇒ 身份坐实
+#                                           device_id Type=0x06(I2C:4 0x0C)，|B|=0.259 G（在标定窗口内）
+#     ★ 2026-09-30 晚：已切换到 ist8310，下面那一行就是最终写法。
+#       ⚠️ **必须带 `-a 0x0C`**：IST8310 驱动的缺省地址是 0x0E（ist8310_main.cpp:55），
+#          而它的 probe() 【只在你给的地址上读 WAI】，0x0C~0x0F 那圈只用来写软复位、不用来读。
+#          本片被 CAD1/CAD0 拉到 0x0C ⇒ 不传 -a 永远读不到（已实测：报 no instance started）。
 #
 #   气压计 = Goertek SPA06，I2C2，7bit 地址 0x77（驱动默认 0x76 ⇒ 必须显式 -a）
 #       spa06 -I -b 2 -a 0x77 start      → spa06 #0 on I2C bus 2 address 0x77   ✅
@@ -69,12 +73,13 @@ hxy42688p -s -b 1 -R 0 start
 #   旁证：只有 -X 这条路会打印 WARN（platforms/common/i2c_spi_buses.cpp:766-772），
 #   -I 打的是 ERROR —— 当年 ist8310 报的正是 WARN ⇒ **那次测试走的是 -X，无效**。
 # ★ 所以"ist8310 起不来"从来没有被真正验证过。
-#   正解：改为 `ist8310 -I -b 4 -R 0 start`（IST8310 驱动的 probe 会校验 WAI==0x10）。
-#   ⚠️ 切换前需重编重烧；也可先在控制台热试：
-#        af9838 stop
-#        ist8310 -I -b 4 start
-#        listener sensor_mag          # |B| 应 ≈ 0.4~0.6 G
-af9838 -I -b 4 -R 0 start
+#   正解 = 下面这一行（已实测通过）。
+#   ⚠️ **必须带 `-a 0x0C`** —— IST8310 驱动缺省 0x0E，而 0x0C~0x0F 那圈只写软复位、不读。
+#       实测：`ist8310 -I -b 4 start`        → ERROR no instance started（读的是 0x0E）
+#             `ist8310 -I -b 4 -a 0x0C start` → ✅ device_id Type=0x06(I2C:4 0x0C)，|B|=0.259 G
+# ⚠️ |B| 实测 0.259 G（≈26 µT）比中国地表 (~50 µT) 偏低约 2×，但已落进 lm_mag_fit 的
+#    半径窗口 (0.2, 0.7) ⇒ 标定能跑通，真正的刻度由标定自己估。若 fitness 很差再回头查。
+ist8310 -I -b 4 -a 0x0C -R 0 start
 
 # 气压计: SPA06-003 on I2C2 (PB10/PB11)
 # ★ 实测确认（2026-09-30）：器件在 0x77，而驱动默认 0x76 ⇒ **必须显式 -a 0x77**，
