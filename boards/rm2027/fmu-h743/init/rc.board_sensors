@@ -72,3 +72,12 @@ af9838 -I -b 4 -R 0 start
 # ★ 实测确认（2026-09-30）：器件在 0x77，而驱动默认 0x76 ⇒ **必须显式 -a 0x77**，
 #   否则 probe 会去问 0x76、拿 NACK，报 "no instance started"。
 spa06 -I -b 2 -a 0x77 start
+
+# 外置陀螺 H104 (HiPNUC HI04M0) on USART1 = /dev/ttyS0
+#   协议 HI91 定长 82 字节 / CRC-16/XMODEM，模块出厂 100 Hz @115200；
+#   驱动发 sensor_gyro + sensor_accel（**同一个 device_id**），sensors 模块会自动
+#   为这一对建 VehicleIMU（src/modules/sensors/sensors.cpp: InitializeVehicleIMU）。
+#   解析器已把模块的 RFU 载体系换算成 PX4 的 FRD ⇒ -r 保持 0；
+#   只有模块在机架上的贴装方向与"右前上"不符时才需要调 -r。
+#   ⚠️ 放飞前必须解决：X/Y 正负方向尚未用实物转动验证（见 work/spi-runtime/H104-帧格式规格.md §8.2）
+h104_imu start
