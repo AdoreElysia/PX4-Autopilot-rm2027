@@ -269,6 +269,10 @@ void BMI270::print_status()
 	perf_print_counter(_fifo_empty_perf);
 	perf_print_counter(_fifo_overflow_perf);
 	perf_print_counter(_fifo_reset_perf);
+	// ★ rm2027/fmu-h743：轮询路径的重复样本计数。
+	//   长期快速上涨 ⇒ 器件真实 ODR 远低于轮询的 1 kHz（配置没生效的现场证据）。
+	//   上板实测（FIFO 填充速率两法交叉验证）ODR ≈ 1593 Hz ⇒ 这个计数应长期为 0。
+	perf_print_counter(_duplicate_sample_perf);
 	perf_print_counter(_drdy_missed_perf);
 }
 
