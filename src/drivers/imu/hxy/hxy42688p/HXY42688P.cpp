@@ -147,7 +147,8 @@ void HXY42688P::print_status()
 		const register_config_t &reg_cfg = _register_cfg[i];
 		const uint8_t reg_value = RegisterRead(reg_cfg.reg);
 
-		const bool set_ok = (reg_cfg.set_bits == 0) || ((reg_value & reg_cfg.set_bits) == reg_cfg.set_bits);
+		const bool set_ok = (reg_value != 0xFF)
+				    && ((reg_cfg.set_bits == 0) || ((reg_value & reg_cfg.set_bits) == reg_cfg.set_bits));
 
 		// 判据只用 set_bits；clear_bits 仅表示"写入前先清掉这些位"，不能当读回判据
 		// （见 CheckRegisterConfig() 的详细说明：0x41/0x40 曾被它误判）。
@@ -161,6 +162,16 @@ void HXY42688P::print_status()
 	PX4_INFO("failure_count=%d consecutive_stale=%u (limit %u polls = %u ms)",
 		 _failure_count, (unsigned)_consecutive_stale, (unsigned)STALE_SAMPLE_LIMIT,
 		 (unsigned)(STALE_SAMPLE_LIMIT * POLL_INTERVAL_US / 1000));
+
+	// ★ 临时诊断：Configure() 里 GYR_CONF 那一步的完整过程
+	PX4_INFO("GYR_CONF step: set=0x%02x clear=0x%02x | PWR_CTRL before=0x%02x after=0x%02x"
+		 " | orig=0x%02x wrote=0x%02x | readback immediate=0x%02x late=0x%02x"
+		 " | 补写 wrote2=0x%02x final=0x%02x",
+		 (unsigned)_dbg_gyr_set, (unsigned)_dbg_gyr_clr,
+		 (unsigned)_dbg_pwr_before, (unsigned)_dbg_pwr_after,
+		 (unsigned)_dbg_gyr_orig, (unsigned)_dbg_gyr_wrote,
+		 (unsigned)_dbg_gyr_rd_imm, (unsigned)_dbg_gyr_rd_late,
+		 (unsigned)_dbg_gyr_wrote2, (unsigned)_dbg_gyr_rd_final);
 
 	perf_print_counter(_bad_register_perf);
 	perf_print_counter(_bad_transfer_perf);
@@ -332,11 +343,23 @@ bool HXY42688P::Configure()
 	RegisterWrite(Register::PWR_CTRL, 0x00);	// ACC_EN=0, GYR_EN=0, TEMP_EN=0
 	px4_usleep(1_ms);				// §5.45：配置完寄存器后建议延时 1ms 再进行后续操作
 
-	ApplyRegisterConfig(Register::GYR_CONF);	// 关断状态下写 GYR_CONF（含 GYR_NOISE_PERF=1）
+	// ★ 临时诊断：把这一步的"读-改-写"全过程记录下来（见 HXY42688P.hpp 的 _dbg_* 注释）
+	{
+		const register_config_t &cfg = RegisterConfig(Register::GYR_CONF);
+		_dbg_gyr_set   = cfg.set_bits;
+		_dbg_gyr_clr   = cfg.clear_bits;
+		_dbg_pwr_before = RegisterRead(Register::PWR_CTRL);
+		_dbg_gyr_orig  = RegisterRead(Register::GYR_CONF);
+		_dbg_gyr_wrote = (uint8_t)((_dbg_gyr_orig & ~cfg.clear_bits) | cfg.set_bits);
+		RegisterWrite(Register::GYR_CONF, _dbg_gyr_wrote);
+		_dbg_gyr_rd_imm = RegisterRead(Register::GYR_CONF);
+	}
 
 	// ---- 2) 手册 §5.45：先把 PWR_CTRL 写成 0x0E，延时 10ms，之后再进行其他配置 ----
 	RegisterWrite(Register::PWR_CTRL, PWR_CTRL_BIT::accel_gyr_temp_en);
 	px4_usleep(10_ms);
+	_dbg_pwr_after = RegisterRead(Register::PWR_CTRL);
+	_dbg_gyr_rd_late = RegisterRead(Register::GYR_CONF);
 
 	// ---- 3) 加速度计：手册 §5.43 步骤 2/3「设置量程 → 设置 ACC_CONF → 延时 2ms」----
 	ApplyRegisterConfig(Register::ACC_RANGE);	// ±4g（§5.38 FS[1:0]=01）
@@ -345,7 +368,25 @@ bool HXY42688P::Configure()
 
 	// ---- 4) 陀螺仪量程：手册 §5.44 步骤2「设置陀螺仪量程，通常设置为 ±2000dps」----
 	ApplyRegisterConfig(Register::GYR_RANGE);	// FS[2:0]=000（§5.40），B4 OIS_RANGE=0
-	px4_usleep(2_ms);				// §5.44 步骤3「配置完 0x42 后延时 2ms」（此处 GYR_CONF 已写）
+	px4_usleep(2_ms);				// §5.44 步骤3
+
+	// ---- 4b) ★ GYR_CONF 补写一手：在【所有其它配置都写完之后】再写一次 GYR_CONF ----
+	//   为什么要有这一手（2026-09-30 深夜，ST-Link 实测）：
+	//     · `gyrconf-timing.tcl` 把驱动的原时序（PWR_CTRL=0 → 写 0x42=0xCC → PWR_CTRL=0x0E）
+	//       在芯片上手工重放，0x42 **存住了 0xCC**（变体 A/B/C/D 全部 KEEP）
+	//       ⇒ "关断中写会被上电吃掉"这个假说**已被实验否证**。
+	//     · 但驱动跑完 Configure() 后 0x42 恒为缺省 0xA9，而 0x40/0x41/0x7D 都写进去了。
+	//     · ST-Link 变体 D 证明：PWR_CTRL 已是 0x0E 时写 0x42=0xCC 能稳稳存住。
+	//   ⇒ 保留手册 §5.39 要求的"关断中配置 GYR_NOISE_PERF"，同时补这一手做兜底；
+	//     两手的写值与读回都记进 _dbg_*，下一次 `status` 就能判决是哪一手生效。
+	{
+		const register_config_t &cfg = RegisterConfig(Register::GYR_CONF);
+		const uint8_t orig = RegisterRead(Register::GYR_CONF);
+		_dbg_gyr_wrote2 = (uint8_t)((orig & ~cfg.clear_bits) | cfg.set_bits);
+		RegisterWrite(Register::GYR_CONF, _dbg_gyr_wrote2);
+		px4_usleep(1_ms);
+		_dbg_gyr_rd_final = RegisterRead(Register::GYR_CONF);
+	}
 
 	// ---- 5) 手册 §5.45/§4.1：配置完寄存器后延时 1ms 再进行寄存器读取操作 ----
 	px4_usleep(1_ms);
@@ -361,6 +402,19 @@ bool HXY42688P::Configure()
 
 	const bool ok = registers_ok && data_stat_ok;
 	_verify_failed = !ok;
+
+	// ★ 临时诊断：把 GYR_CONF 那一手的全过程【直接打进启动日志】——
+	//   `hxy42688p status` 也会打同一条，但现场 QGC 会持续抽干 console 未读窗口，
+	//   而 SWD 抓 dmesg 环形缓冲区（checklog.sh）只能看到"写进去过的字节"。
+	//   ⇒ 在 Configure() 里打一次，抓一次缓冲区就能看到，不必再依赖人工敲 status。
+	PX4_ERR("GYR_CONF step: set=0x%02x clear=0x%02x | PWR_CTRL before=0x%02x after=0x%02x"
+		" | orig=0x%02x wrote=0x%02x | readback immediate=0x%02x late=0x%02x"
+		" | 补写 wrote2=0x%02x final=0x%02x",
+		(unsigned)_dbg_gyr_set, (unsigned)_dbg_gyr_clr,
+		(unsigned)_dbg_pwr_before, (unsigned)_dbg_pwr_after,
+		(unsigned)_dbg_gyr_orig, (unsigned)_dbg_gyr_wrote,
+		(unsigned)_dbg_gyr_rd_imm, (unsigned)_dbg_gyr_rd_late,
+		(unsigned)_dbg_gyr_wrote2, (unsigned)_dbg_gyr_rd_final);
 
 	if (!ok) {
 		perf_count(_bad_register_perf);
@@ -421,7 +475,12 @@ bool HXY42688P::CheckRegisterConfig(uint8_t index)
 	//      0x40 = 0x8c  ← 正是目标值，却被判成 MISMATCH（因为 clear=0xff）
 	//      ⇒ 旧判据把 5 条里的 3 条全判错，只有 0x42 是真的失败。
 	//    正确判据 = set_bits 必须全部置上。
-	const bool set_ok = (reg_cfg.set_bits == 0) || ((reg_value & reg_cfg.set_bits) == reg_cfg.set_bits);
+	// ⚠️ 再补一条（2026-09-30 实测）：读到 **0xFF** 时不能算通过 —— 0xFF 是“MISO 恒高 /
+	//    读不到器件”的典型特征，而 `0xff & set_bits == set_bits` 恒成立，会把总线故障
+	//    伪装成 OK（实测出现过 `0x42 = 0xff ... OK`、`0x43 = 0xff ... OK`）。
+	const bool bus_error = (reg_value == 0xFF);	// MISO 恒高 ⇒ 这一拍没读到器件
+	const bool set_ok = !bus_error
+			    && ((reg_cfg.set_bits == 0) || ((reg_value & reg_cfg.set_bits) == reg_cfg.set_bits));
 
 	if (set_ok) {
 		return true;
@@ -435,13 +494,14 @@ bool HXY42688P::CheckRegisterConfig(uint8_t index)
 	const uint32_t failures = _reg_fail_count[index];
 
 	if (failures <= 3 || (failures % 100) == 0) {
-		PX4_ERR("0x%02x read back 0x%02x, wanted set 0x%02x (write used clear 0x%02x) (failures: %" PRIu32 ")",
+		PX4_ERR("0x%02x read back 0x%02x, wanted set 0x%02x (write used clear 0x%02x) (failures: %" PRIu32 ")%s",
 			(unsigned)(uint8_t)reg_cfg.reg, (unsigned)reg_value,
-			(unsigned)reg_cfg.set_bits, (unsigned)reg_cfg.clear_bits, failures);
+			(unsigned)reg_cfg.set_bits, (unsigned)reg_cfg.clear_bits, failures,
+			bus_error ? "  <== 0xFF: 这一拍根本没读到器件（总线故障，不是配置被拒）" : "");
 
-		if (reg_cfg.reg == Register::GYR_CONF) {
+		if (reg_cfg.reg == Register::GYR_CONF && !bus_error) {
 			PX4_ERR("GYR_CONF(0x42) not accepted: 手册 §5.39 备注要求先关闭 ACC+GYR 再写 GYR_CONF"
-				"（本驱动已按该顺序写），若仍失败说明器件不接受 GYR_NOISE_PERF/ODR 组合");
+				"（本驱动已按该顺序写，并在所有配置写完后补写一手），若仍失败说明器件不接受该组合");
 		}
 	}
 
