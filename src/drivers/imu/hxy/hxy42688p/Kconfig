@@ -1,0 +1,10 @@
+menuconfig DRIVERS_IMU_HXY_HXY42688P
+	bool "huaxuanyang hxy42688p"
+	default n
+	---help---
+		Enable support for the 华轩阳 (HuaXuanYang / HXY) "ICM-42688P"
+		six-axis IMU module (SPI, WHO_AM_I(0x01) = 0x6A).
+
+		This is an independent driver implemented strictly from the vendor
+		manual (华轩阳HXY_ICM-42688P_六轴传感器模块_手册), NOT the Bosch
+		BMI270 driver and NOT a Bosch-compatible patch.

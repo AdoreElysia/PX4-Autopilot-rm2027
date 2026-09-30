@@ -20,40 +20,36 @@
 #   气压计 = Goertek SPA06，I2C2，7bit 地址 0x77（驱动默认 0x76 ⇒ 必须显式 -a）
 #       spa06 -I -b 2 -a 0x77 start      → spa06 #0 on I2C bus 2 address 0x77   ✅
 #
-#   IMU    = ★ 已取证（2026-09-30，见 开发日志/09-IMU寄存器指纹.md）：
-#           **BMI270 寄存器图兼容件**（不是 42688-P，也不是 QMI8658）。
-#           证据：SENSORTIME@0x18-0x1A 活计时器、EVENT@0x1B、TEMP@0x22/0x23、
-#                 ACC_CONF@0x40=0xA8、GYR_CONF@0x42=0xA9、AUX_CONF@0x44=0x46、
-#                 FIFO_DOWNS@0x45=0x88、PWR_CONF/PWR_CTRL/CMD@0x7C/0x7D/0x7E
-#                 —— 逐条吻合 Bosch 官方寄存器图；
-#           功能铁证：按 BMI270 写法 PWR_CTRL(0x7D)=0x0E ⇒ 0x0C~0x17 立刻出活的加速度/陀螺数据，
-#                 写回 0 立刻冻结 ⇒ 寄存器图 + 功能 双向吻合。
-#           唯一异常：CHIP_ID(0x00) 读 0x00，而正品 BMI270 必须是 0x24 ⇒ PX4 驱动拒启。
-#           ⚠️⚠️ 【不要】只放宽 PX4 bmi270 驱动的 ID 检查：那会放出它的"微码上传"步骤
-#                 （写 INIT_CTRL(0x59)/INIT_DATA(0x5E) 上传 329 字节配置块），
-#                 实测会把这颗片【锁死】（读全 0xFF），只能靠断电恢复。
-#                 正确方向是"跳过微码上传"的驱动（已证明不上传微码也能出数据）。
-#           取证工具（openocd 脚本）在 work/spi-fingerprint/ —— **只读取证优先**；
-#                 对未知器件的写测试（尤其 0x59/0x5E 配置上传端口）必须先经 Lead/用户同意。
+#   IMU    = ★ 以厂商手册为唯一基准（2026-09-30 定稿）：
+#           华轩阳（HXY）「ICM-42688P」六轴传感器模块。
+#           - 器件识别：WHO_AM_I(0x01) 缺省 0x6A（手册 §5.1 / §4.1）；
+#             ⚠️ 0x00【不是】寄存器 —— 手册 §4.1 的通用寄存器表从 0x01 开始，
+#                所以旧口径"CHIP_ID(0x00)=0x00 ⇒ BMI270 兼容件"是错的。
+#           - 驱动：src/drivers/imu/hxy/hxy42688p（命令名 hxy42688p），独立新建，
+#             不共用 Bosch BMI270 驱动、不含微码上传、不碰 BMI270 的寄存器图
+#             （本片没有 PWR_CONF(0x7C)、没有 CMD(0x7E)、FIFO 在 0x1C~0x21 而非 0x24~0x26/0x46~0x49）。
+#           - 初始化按手册：§5.42 SOFT_RST(0x4A)=0xA5 + 50ms → §5.45 PWR_CTRL(0x7D)=0x0E + 10ms
+#             → §5.44 通电稳定 250ms → §5.39 关断状态下写 GYR_CONF → 打开 → §5.37/§5.38/§5.40 量程/ODR
+#             → §5.8 读 DATA_STAT(0x0B) 校验 ACC_CONF_ERR/GYR_CONF_ERR。
+#           - 取数：查询方式轮询 0x0B~0x17，用 DATA_STAT 的 DRDY 位判新样本（手册 §3.2.1 + §5.8）。
+#           依据：projects/competition/rm2027-drone/references/硬件手册/
+#                 华轩阳HXY_ICM-42688P_六轴传感器模块_手册.pdf
 #
 # 引脚依据：firmware/fmu-h743/引脚映射-H743.md（原理图 V1.0 直读）
 #   引脚经用户人工复核 100% 正确 —— 问题在**型号**，不在引脚。
-#     IMU(?)       SPI1  SCK=PB3  MISO=PA6  MOSI=PD7  CS=PB4  DRDY=PD6
-#     AF9838       I2C4  SCL=PD12 SDA=PD13            @0x0C
-#     SPA06-003    I2C2  SCL=PB10 SDA=PB11            @0x77
+#     IMU(HXY42688P)  SPI1  SCK=PB3  MISO=PA6  MOSI=PD7  CS=PB4  DRDY=PD6
+#     AF9838          I2C4  SCL=PD12 SDA=PD13            @0x0C
+#     SPA06-003       I2C2  SCL=PB10 SDA=PB11            @0x77
 #------------------------------------------------------------------------------
 
 board_adc start
 
-# IMU: 实物 = BMI270 寄存器图兼容件 on SPI1, CS=PB4(GYRO_CS), DRDY=PD6(GYRO_INT1)（见文件头）
-# ⚠️ 型号已定，但驱动还没改：现有 bmi270 驱动会因 CHIP_ID=0x00 拒启，
-#    而只放宽 ID 检查会让它上传微码把片子锁死 ⇒ 需先改造成"跳过微码"的驱动（方案待 Lead 定）。
-#    这一行暂时保留原驱动名，等驱动改造完再换成 bmi270（并同步改 default.px4board / src/spi.cpp）。
-# ★ 2026-09-30 取证结论：实物是【BMI270 寄存器图兼容件】（CHIP_ID=0x00），不是 42688-P。
-#   驱动侧已打板级补丁：接受 CHIP_ID=0x00 并【跳过微码上传】（上传会锁死器件）。
-#   见 开发日志/09-IMU寄存器指纹.md
+# IMU: 华轩阳 HXY「ICM-42688P」on SPI1, CS=PB4(GYRO_CS), DRDY=PD6(GYRO_INT1)（见文件头）
+# 驱动 = hxy42688p（独立驱动，按厂商手册 §5.42/§5.45/§5.44/§5.39 的顺序初始化）。
+# 上电后可先看这条日志：DATA_STAT(0x0B) 的 ACC_CONF_ERR/GYR_CONF_ERR 必须都是 0（手册 §5.8）；
+# 若打印出 "register 0x42 read back ..." 报错，说明 GYR_CONF 没写进去（已知风险点）。
 # TODO(上板核对): -R 旋转值取决于 IMU 在 PCB 上的贴装方向，现按 0 占位。
-bmi270 -s -b 1 -R 0 start
+hxy42688p -s -b 1 -R 0 start
 
 # 磁罗盘: Voltafield AF9838 on I2C4 (PD12/PD13), 7bit 地址 0x0C
 # ★ 实测确认（2026-09-30）：打成 af9838 才起得来；ist8310/ist8308 都起不来。
