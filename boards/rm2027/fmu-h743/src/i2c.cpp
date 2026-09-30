@@ -36,7 +36,20 @@
 /* 本板 I2C 总线（来源：原理图直读）
  *
  *   I2C2 = SPA06-003 气压计    SCL=PB10  SDA=PB11
- *   I2C4 = IST8310  磁罗盘     SCL=PD12  SDA=PD13
+ *   I2C4 = 磁罗盘              SCL=PD12  SDA=PD13
+ *
+ * ⚠️ 磁罗盘型号：原理图写的是 IST8310，但【实物不是它】。
+ *    实测（2026-09-30）：
+ *      af9838  -I -b 4 start   → af9838 #0 on I2C bus 4 address 0xC  ✅ 起得来
+ *      ist8310 -I -b 4 start   → ERROR（IST8310 在 0x0E，本板无）      ❌
+ *      ist8308 / ak09916 / ak8963 → ERROR                            ❌
+ *    0x0C 正好是 AF9838 的默认 7bit 地址（af9838_registers.hpp: I2C_ADDR = 0x0C），
+ *    故按「图纸写 IST8310、实物焊 AF9838」处理，启动命令用 af9838。
+ *
+ * ⚠️ 但要注意：af9838.cpp 的 probe() 【不做任何 ID 校验】—— 它只读一次
+ *    REG_PCODE(0x00) 并检查 I2C 传输成功，读到什么都算过（只把值打印出来）。
+ *    所以"能起来"只证明 0x0C 上有个会 ACK 的器件，还不等于手册级确认它是 AF9838。
+ *    要坐实身份，需要拿 AF9838 手册核对 REG_PCODE 的期望值 —— 见 README 的待办。
  *
  * 总线号 = STM32 外设号（与 matek 模板一致：I2C1→1、I2C2→2）。
  * 两条都是板载器件，故都用 Internal。
