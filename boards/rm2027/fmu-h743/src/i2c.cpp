@@ -38,18 +38,30 @@
  *   I2C2 = SPA06-003 气压计    SCL=PB10  SDA=PB11
  *   I2C4 = 磁罗盘              SCL=PD12  SDA=PD13
  *
- * ⚠️ 磁罗盘型号：原理图写的是 IST8310，但【实物不是它】。
- *    实测（2026-09-30）：
- *      af9838  -I -b 4 start   → af9838 #0 on I2C bus 4 address 0xC  ✅ 起得来
- *      ist8310 -I -b 4 start   → ERROR（IST8310 在 0x0E，本板无）      ❌
- *      ist8308 / ak09916 / ak8963 → ERROR                            ❌
- *    0x0C 正好是 AF9838 的默认 7bit 地址（af9838_registers.hpp: I2C_ADDR = 0x0C），
- *    故按「图纸写 IST8310、实物焊 AF9838」处理，启动命令用 af9838。
+ * ⚠️ 磁罗盘型号：**原理图写 IST8310，实物也是 IST8310**（不要被"0x0C"误导，见下）。
  *
- * ⚠️ 但要注意：af9838.cpp 的 probe() 【不做任何 ID 校验】—— 它只读一次
- *    REG_PCODE(0x00) 并检查 I2C 传输成功，读到什么都算过（只把值打印出来）。
- *    所以"能起来"只证明 0x0C 上有个会 ACK 的器件，还不等于手册级确认它是 AF9838。
- *    要坐实身份，需要拿 AF9838 手册核对 REG_PCODE 的期望值 —— 见 README 的待办。
+ *   依据（唯一基准 = iSentek IST8310 数据手册，v1.2）：
+ *     §6.4.2 WAI(0x00) Device ID 缺省 = 0x10
+ *     §6.4.4 输出寄存器 = 0x03~0x08 (DATAXL/DATAXH/DATAYL/DATAYH/DATAZL/DATAZH)
+ *     §6.1.1 从机地址表：CAD1=CAD0=VSS ⇒ 7bit 地址 = 0CH
+ *            （VSS/VDD=0DH、VDD/VSS=0EH、VDD/VDD=0FH；悬空为 0EH）
+ *     ⇒ **0x0C 是 IST8310 的一种合法配置**，不是"AF9838 专属地址"。
+ *     手册：/mnt/h/AI/shared/projects/competition/rm2027-drone/references/硬件手册/
+ *           iSentek_IST8310_datasheet_v1.2.pdf（含文字提取版）
+ *
+ *   ⚠️⚠️ 错误结论的来历（已作废，勿再引用）：
+ *     曾按"0x0C=AF9838 默认地址、IST8310 在 0x0E"推断"实物是 AF9838"。
+ *     两条推理都不成立：
+ *       (a) 0x0C 本身就是 IST8310 的合法地址（手册地址表）；
+ *       (b) 当年那次 `ist8310 -I -b 4 start` 报的是 WARN，而 WARN 只在 **-X（外部总线）**
+ *           路径上出现 —— -X 下 PX4 不遍历 Internal 总线，**根本没碰过 I2C4**。
+ *     而 `af9838` 之所以"起来了"，是因为 af9838.cpp 的 probe() **不校验 ID**
+ *     （只读一次 REG_PCODE(0x00) 并检查 I2C 传输成功，读到什么都算过）。
+ *     ⇒ 一个不校验 ID 的驱动，把 IST8310 认成了 AF9838。
+ *
+ *   ⚠️ 当前启动命令仍是 af9838（待切换到 ist8310）。其读数**不可信**，原因见
+ *      work/spi-runtime/README.md 的磁罗盘条目：标度 0.1 vs 手册 0.3 µT/LSB、
+ *      软复位写 0x11（IST8310 无此寄存器）、自检写 CNTL1=0x09（手册里是 Reserved）。
  *
  * 总线号 = STM32 外设号（与 matek 模板一致：I2C1→1、I2C2→2）。
  * 两条都是板载器件，故都用 Internal。
