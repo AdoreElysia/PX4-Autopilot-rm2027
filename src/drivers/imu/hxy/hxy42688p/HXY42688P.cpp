@@ -659,14 +659,23 @@ void HXY42688P::SetAccelScaleAndRange()
 	}
 
 	const float scale = range_g * CONSTANTS_ONE_G / 32768.f * ACCEL_GAIN_CORRECTION;
-	_px4_accel.set_scale(scale);
-	_px4_accel.set_range(range_g * CONSTANTS_ONE_G);
 
-	PX4_INFO("accel: ACC_RANGE(0x41) read 0x%02x (expected 0x%02x)%s, range=+-%.0fg, scale=%.9f m/s^2/LSB"
-		 " (手册值 x %.4f 增益修正)",
+	// ★ 满量程也必须跟着改：`set_range()` 决定 `_clip_limit = range/scale × 0.999`（单位=码）。
+	//   既然真实标度是「手册 × 1.7512」，那**真实的物理满量程也是「标称 × 1.7512」**：
+	//     FS=01 名义 ±4g ⇒ 实测 1g=4678 码 ⇒ 32768/4678 = **7.00 g**（四档实测反推：
+	//     3.51 / 7.00 / 13.80 / 27.01 g，而非 2/4/8/16）。
+	//   ⇒ 若只改 scale 不改 range，裁剪阈值会停在 4g×0.999/scale = 18692 码，
+	//     而器件能出到 32767 码 ⇒ **4g~7g 之间会被误报 clip_counter**（上一版就是这个 bug）。
+	const float range_m_s2 = range_g * CONSTANTS_ONE_G * ACCEL_GAIN_CORRECTION;
+	_px4_accel.set_scale(scale);
+	_px4_accel.set_range(range_m_s2);
+
+	PX4_INFO("accel: ACC_RANGE(0x41) read 0x%02x (expected 0x%02x)%s, nominal=+-%.0fg"
+		 " -> real range=+-%.2fg, scale=%.9f m/s^2/LSB (手册值 x %.4f 增益修正)",
 		 (unsigned)ACC_RANGE, (unsigned)acc_range_expected,
 		 (ACC_RANGE == acc_range_expected) ? "" : "  <== 量程回读与写入不一致！标度会差 2 的幂次",
-		 (double)range_g, (double)scale, (double)ACCEL_GAIN_CORRECTION);
+		 (double)range_g, (double)(range_m_s2 / CONSTANTS_ONE_G), (double)scale,
+		 (double)ACCEL_GAIN_CORRECTION);
 }
 
 void HXY42688P::SetGyroScale()
