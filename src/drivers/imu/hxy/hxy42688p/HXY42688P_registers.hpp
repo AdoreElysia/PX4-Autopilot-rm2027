@@ -188,16 +188,25 @@ static constexpr uint8_t gyr_conf_high_perf_1600hz = gyr_filter_perf | gyr_noise
 
 namespace GYR_RANGE_BIT
 {
-// §5.40 GYR_RANGE(0x43)：B4 OIS_RANGE；B2:B0 = FS[2:0]
-// 000 = ±2000dps（缺省）/ 001 = ±1000 / 010 = ±500 / 011 = ±250 / 100 = ±125
-static constexpr uint8_t ois_range       = Bit4;
+// §5.40 GYR_RANGE(0x43)：**B3 OIS_RANGE**；B2:B0 = FS[2:0]
+//
+// ⚠️⚠️ 2026-10-01 更正（代码审查发现，已回手册逐列核对）：
+//   手册 §5.40 的位域表列头是  `B7  B6  B5  B4  B3        B2   B1   B0`
+//                       取值     `--  --  --  --  OIS_RANGE FS2  FS1  FS0`
+//   ⇒ **OIS_RANGE 在 B3，不是 B4。** 本文件旧注释写 B4、旧代码写 `Bit4`，**都是错的**。
+//   危害：旧 `gyr_range_mask = Bit4|Bit2|Bit1|Bit0 = 0x17`，读-改-写时会**去清 B4**，
+//         而 B4 在手冊里是 `--`（保留位），且手册明确警告
+//         「标识为"保留"的，在使用中不要更改，可能会引起永久性破坏」。
+//   当前 `set_bits = 0`（FS=000、OIS_RANGE=0）⇒ 功能上今天看不出差别，
+//   但**动保留位这件事本身必须消除**。
+static constexpr uint8_t ois_range       = Bit3;	// ← 曾误写为 Bit4
 static constexpr uint8_t gyr_fs_2000dps  = 0b000;
 static constexpr uint8_t gyr_fs_1000dps  = 0b001;
 static constexpr uint8_t gyr_fs_500dps   = 0b010;
 static constexpr uint8_t gyr_fs_250dps   = 0b011;
 static constexpr uint8_t gyr_fs_125dps   = 0b100;
 static constexpr uint8_t gyr_fs_mask     = Bit2 | Bit1 | Bit0;
-static constexpr uint8_t gyr_range_mask  = Bit4 | Bit2 | Bit1 | Bit0;
+static constexpr uint8_t gyr_range_mask  = Bit3 | Bit2 | Bit1 | Bit0;	// = 0x0F（曾误为 0x17）
 }
 
 } // namespace HXY42688P_REGS
