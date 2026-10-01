@@ -579,7 +579,32 @@ bool HXY42688P::DataReadPublish(const hrt_abstime &timestamp_sample)
 
 	// FLU → FRD（y、z 取反）；传入的是【原始码值】，缩放由 PX4Accelerometer/PX4Gyroscope
 	// 在 update() 内部按 _scale 完成（与 PX4 其它 IMU 驱动一致）。
-	_px4_accel.update(timestamp_sample, (float)accel_x, (float)negate_clamped(accel_y), (float)negate_clamped(accel_z));
+	// ★★ 2026-10-01：**chip Y 通道增益异常，单独修正**（实测，不是猜的）
+	//
+	// 症状：`-R 6` 把轴映射摆正之后，六面标定从"第一面就挂"变成 4/6 完成，
+	//       但剩两格报 `ERROR: invalid orientation` —— 因为 `detect_orientation()`
+	//       要求向量落在 ±g 的 ±5 m/s² 内（calibration_routines.cpp:75），而 hxy 在
+	//       "重力压在板子 X 轴"的姿势下 `|a|` 读到 3.6g。
+	//
+	// 实测（同一姿势、同时刻，H104 当参照）：
+	//     hxy :  x=-35.73041  y= 0.13626  z=-0.94965   |a| = 35.75 m/s² = 3.645 g
+	//     H104:  x= -9.84545  y=-0.01258  z=-0.08166   |a| =  9.846 m/s² = 1.004 g
+	//   ⇒ **方向完全一致（两边都是 99.99% 压在 X 上）、只有幅值差 3.629 倍** ⇒ 不是运动、不是轴错。
+	//
+	// 而且这是个**纯增益**——用两个姿势验算（原始码 → 除以 3.629）：
+	//     平放（重力在 chip Z）: (66,  590,   4629) → √(66²+163²+4629²)  = 4632 码 ≈ 1g ✓
+	//     重力在 chip Y        : (54, -16787, 575) → √(54²+4624²+575²)  = 4660 码 ≈ 1g ✓
+	//   ⇒ 两个姿势都回到 1g。所以可以修正，不是坏器件。
+	//
+	// ⚠️ 为什么只修 Y 不修别的轴：chip Z 与 chip X 的 1g 码值 ≈ 4650 / 4340（同量级），
+	//    只有 chip Y ≈ 16800，**只有这一路异常**。
+	// ⚠️ 这条属于"bench 标定"性质；最终仍应由六面标定给出的 scale 覆盖。
+	//    六面标定跑通后若 `CAL_ACC*_SCALE` 明显偏离 1，说明这条常数该重新拟。
+	static constexpr float ACCEL_Y_CHANNEL_GAIN_FIX = 1.0f / 3.629f;	// 实测 35.73041 / 9.84545
+
+	const float accel_y_fixed = (float)negate_clamped(accel_y) * ACCEL_Y_CHANNEL_GAIN_FIX;
+
+	_px4_accel.update(timestamp_sample, (float)accel_x, accel_y_fixed, (float)negate_clamped(accel_z));
 	_px4_gyro.update(timestamp_sample, (float)gyro_x, (float)negate_clamped(gyro_y), (float)negate_clamped(gyro_z));
 
 	return true;
