@@ -31,12 +31,20 @@ CONFIG_DRIVERS_IMU_HIPNUC_H104=y            # 外置陀螺 H104 (HiPNUC HI04M0) 
 #   CONFIG_DRIVERS_IMU_INVENSENSE_IIM42652=y    # 0x75/0x6F（车规版 42688）
 # --- 磁罗盘 -------------------------------------------------------------------
 CONFIG_COMMON_MAGNETOMETER=y
-# ★ 2026-09-30 实测：实物是 Voltafield AF9838 @I2C4 0x0C，不是 IST8310 @0x0E。
+# ★ 2026-09-30 晚更正：实物是 iSentek IST8310 @I2C4 0x0C（**与原理图一致**）。
+#   此前"实物是 Voltafield AF9838、不是 IST8310"的结论【作废】。
+#   依据 iSentek IST8310 数据手册 v1.2（references/硬件手册/）：
+#     §6.4.2 WAI(0x00) Device ID = 0x10
+#     §6.4.4 输出寄存器 = 0x03~0x08
+#     §6.1.1 从机地址表：CAD1=CAD0=VSS ⇒ 7bit = 0CH
+#   实测已通过（2026-09-30 晚）：`ist8310 -I -b 4 -a 0x0C start`
+#     → device_id Type=0x06(DRV_MAG_DEVTYPE_IST8310) / I2C:4 0x0C，|B|=0.259 G
+#       （probe 校验 WAI==0x10 通过 ⇒ 身份坐实；|B| 已在标定窗口 (0.2,0.7) 内）
+#   ⚠️ 必须显式给 `-a 0x0C`：IST8310 驱动缺省 0x0E，而 0x0C~0x0F 那圈只写软复位、不读。
 # 注意：CONFIG_COMMON_MAGNETOMETER=y 会 `select` 全部磁罗盘驱动
 #       （src/drivers/magnetometer/Kconfig 里 AF9838/IST8310 都在 select 列表里）
-#       ⇒ 这两颗**都会**被编进固件，`ist8310` 命令依然存在（敲了会 ERROR，正常）。
-#       本行只是"显式声明板载件"，让配置自解释；删掉它 AF9838 也照样能编进去。
-CONFIG_DRIVERS_MAGNETOMETER_VOLTAFIELD_AF9838=y
+#       ⇒ 两颗都会编进固件。本行只是"显式声明板载件"，让配置自解释。
+CONFIG_DRIVERS_MAGNETOMETER_ISENTEK_IST8310=y
 CONFIG_DRIVERS_PWM_OUT=y
 CONFIG_DRIVERS_RC_INPUT=y
 CONFIG_COMMON_TELEMETRY=y
