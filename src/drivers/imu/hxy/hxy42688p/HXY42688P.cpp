@@ -148,12 +148,13 @@ void HXY42688P::print_status()
 		const uint8_t reg_value = RegisterRead(reg_cfg.reg);
 
 		const bool set_ok = (reg_cfg.set_bits == 0) || ((reg_value & reg_cfg.set_bits) == reg_cfg.set_bits);
-		const bool clear_ok = (reg_cfg.clear_bits == 0) || ((reg_value & reg_cfg.clear_bits) == 0);
 
-		PX4_INFO("0x%02x = 0x%02x  (want set 0x%02x / clear 0x%02x)  %s  [readback failures: %d]",
+		// 判据只用 set_bits；clear_bits 仅表示"写入前先清掉这些位"，不能当读回判据
+		// （见 CheckRegisterConfig() 的详细说明：0x41/0x40 曾被它误判）。
+		PX4_INFO("0x%02x = 0x%02x  (want set 0x%02x; write used clear 0x%02x)  %s  [readback failures: %d]",
 			 (unsigned)(uint8_t)reg_cfg.reg, (unsigned)reg_value,
 			 (unsigned)reg_cfg.set_bits, (unsigned)reg_cfg.clear_bits,
-			 (set_ok && clear_ok) ? "OK" : "MISMATCH",
+			 set_ok ? "OK" : "MISMATCH",
 			 (int)_reg_fail_count[i]);
 	}
 
@@ -411,10 +412,18 @@ bool HXY42688P::CheckRegisterConfig(uint8_t index)
 	const register_config_t &reg_cfg = _register_cfg[index];
 	const uint8_t reg_value = RegisterRead(reg_cfg.reg);
 
+	// ⚠️ clear_bits【不能】当作读回判据 —— 它的语义只是"写入前先清掉这些位"：
+	//    (a) 同一位可以同时在 set_bits 和 clear_bits 里。例如 ACC_RANGE：set=0x01 / clear=0x03
+	//        （选 FS[1:0]=01 之前要连 bit1 一起清），写对了也必然 (value & clear) != 0；
+	//    (b) clear_bits 可能是 0xff（"整寄存器重写"），那任何非零值都会误报失败。
+	//    实测（2026-09-30，rm2027 板，hxy42688p status）：
+	//      0x41 = 0x01  ← 正是目标值，却被旧判据判成 MISMATCH（因为 0x01 & 0x03 != 0）
+	//      0x40 = 0x8c  ← 正是目标值，却被判成 MISMATCH（因为 clear=0xff）
+	//      ⇒ 旧判据把 5 条里的 3 条全判错，只有 0x42 是真的失败。
+	//    正确判据 = set_bits 必须全部置上。
 	const bool set_ok = (reg_cfg.set_bits == 0) || ((reg_value & reg_cfg.set_bits) == reg_cfg.set_bits);
-	const bool clear_ok = (reg_cfg.clear_bits == 0) || ((reg_value & reg_cfg.clear_bits) == 0);
 
-	if (set_ok && clear_ok) {
+	if (set_ok) {
 		return true;
 	}
 
@@ -426,7 +435,7 @@ bool HXY42688P::CheckRegisterConfig(uint8_t index)
 	const uint32_t failures = _reg_fail_count[index];
 
 	if (failures <= 3 || (failures % 100) == 0) {
-		PX4_ERR("0x%02x read back 0x%02x, expected set-bits 0x%02x / clear-bits 0x%02x (failures: %" PRIu32 ")",
+		PX4_ERR("0x%02x read back 0x%02x, wanted set 0x%02x (write used clear 0x%02x) (failures: %" PRIu32 ")",
 			(unsigned)(uint8_t)reg_cfg.reg, (unsigned)reg_value,
 			(unsigned)reg_cfg.set_bits, (unsigned)reg_cfg.clear_bits, failures);
 
