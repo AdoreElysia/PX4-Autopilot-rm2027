@@ -632,14 +632,18 @@ static constexpr float ACCEL_GAIN_CORRECTION = 1.7512f;	// = 8192 / 4678（2026-
 void HXY42688P::SetAccelScaleAndRange()
 {
 	// 手册 §5.38：FS[1:0] 00=±2G 01=±4G 10=±8G 11=±16G
-	const uint8_t ACC_RANGE = RegisterRead(Register::ACC_RANGE) & ACC_RANGE_BIT::acc_range_mask;
-
-	// 把"回读到的量程 + 最终标度"打出来 —— 量程回读若抽风（本板实测过 0x40=0xA6、
-	// 0x42/0x43=0xFF 这种坏读），标度会整体差 2 的幂次，必须能一眼看见。
-	const uint8_t acc_range_expected = ACC_RANGE_BIT::acc_range_4g;	// 本驱动配置的就是 ±4g
+	//
+	// ★★ 2026-10-01（代码审查后修正）：**不要拿"一次性运行时回读"当标度依据**。
+	//   本函数在 Configure() 末尾只调用一次；若那一次回读抽风（本板实测过 0x40=0xA6、
+	//   0x42/0x43=0xFF 这类坏读），标度会整体差 2 的幂次，而**没有任何机制会发现**
+	//   （ACC_RANGE 的 set_bits=0x01 还能被 1 Hz 校验发现，GYR_RANGE 的 set_bits=0x00
+	//    则让 CheckRegisterConfig 恒判 OK —— 见本轮审查的同类发现）。
+	//   ⇒ 改用驱动**自己写下去的值**（Configure() 里写的就是已知常量），回读只作校验。
+	const uint8_t acc_range_applied  = ACC_RANGE_BIT::acc_range_4g;	// Configure() 实际写入的量程
+	const uint8_t acc_range_readback = RegisterRead(Register::ACC_RANGE) & ACC_RANGE_BIT::acc_range_mask;
 	float range_g = 4.f;
 
-	switch (ACC_RANGE) {
+	switch (acc_range_applied) {
 	case ACC_RANGE_BIT::acc_range_2g:
 		range_g = 2.f;
 		break;
@@ -670,10 +674,10 @@ void HXY42688P::SetAccelScaleAndRange()
 	_px4_accel.set_scale(scale);
 	_px4_accel.set_range(range_m_s2);
 
-	PX4_INFO("accel: ACC_RANGE(0x41) read 0x%02x (expected 0x%02x)%s, nominal=+-%.0fg"
+	PX4_INFO("accel: ACC_RANGE(0x41) applied=0x%02x readback=0x%02x%s, nominal=+-%.0fg"
 		 " -> real range=+-%.2fg, scale=%.9f m/s^2/LSB (手册值 x %.4f 增益修正)",
-		 (unsigned)ACC_RANGE, (unsigned)acc_range_expected,
-		 (ACC_RANGE == acc_range_expected) ? "" : "  <== 量程回读与写入不一致！标度会差 2 的幂次",
+		 (unsigned)acc_range_applied, (unsigned)acc_range_readback,
+		 (acc_range_readback == acc_range_applied) ? "" : "  <== 回读与写入不一致！(标度按写入值算，不受影响)",
 		 (double)range_g, (double)(range_m_s2 / CONSTANTS_ONE_G), (double)scale,
 		 (double)ACCEL_GAIN_CORRECTION);
 }
@@ -681,11 +685,18 @@ void HXY42688P::SetAccelScaleAndRange()
 void HXY42688P::SetGyroScale()
 {
 	// 手册 §5.40：FS[2:0] 000=±2000dps 001=±1000 010=±500 011=±250 100=±125
-	const uint8_t GYR_RANGE = RegisterRead(Register::GYR_RANGE) & GYR_RANGE_BIT::gyr_fs_mask;
+	//
+	// ★★ 同上（2026-10-01 代码审查）：不拿"一次性运行时回读"当标度依据。
+	//   ⚠️ GYR_RANGE 这一条尤其危险 —— 它在 `_register_cfg` 里的 `set_bits = 0`
+	//      （因为目标值就是 0），而 `CheckRegisterConfig` 的判据是
+	//      `set_bits==0 ⇒ 恒 true` ⇒ **1 Hz 的配置校验永远发现不了它被写错/读错**。
+	//   ⇒ 标度一律用驱动**自己写下去的值**（Configure() 写的是已知常量）。
+	const uint8_t gyr_range_applied  = GYR_RANGE_BIT::gyr_fs_2000dps;	// Configure() 写入的 FS
+	const uint8_t gyr_range_readback = RegisterRead(Register::GYR_RANGE) & GYR_RANGE_BIT::gyr_fs_mask;
 
 	float range_rad_s = math::radians(2000.f);	// 缺省 000 = ±2000dps
 
-	switch (GYR_RANGE) {
+	switch (gyr_range_applied) {
 	case GYR_RANGE_BIT::gyr_fs_1000dps:
 		range_rad_s = math::radians(1000.f);
 		break;
@@ -709,6 +720,11 @@ void HXY42688P::SetGyroScale()
 
 	_px4_gyro.set_range(range_rad_s);
 	_px4_gyro.set_scale(range_rad_s / 32768.f);
+
+	PX4_INFO("gyro: GYR_RANGE(0x43) applied=0x%02x readback=0x%02x%s, range=+-%.0f dps, scale=%.9f rad/s/LSB",
+		 (unsigned)gyr_range_applied, (unsigned)gyr_range_readback,
+		 (gyr_range_readback == gyr_range_applied) ? "" : "  <== 回读与写入不一致！(标度按写入值算，不受影响)",
+		 (double)math::degrees(range_rad_s), (double)(range_rad_s / 32768.f));
 }
 
 // ============================================================================
