@@ -63,8 +63,39 @@ static constexpr uint8_t chip_id = 0x24;
 enum class Register : uint8_t {
 	CHIP_ID            = 0x00,
 
+	// ★ rm2027/fmu-h743（2026-09-30）：本板兼容件（华轩阳 HXY「ICM-42688P」）把器件 ID
+	//   放在 0x01（WHO_AM_I，缺省 0x6A），而 0x00 不在它的寄存器表里（读出 0x00）。
+	//   正品 BMI270 的 CHIP_ID 在 0x00=0x24。见
+	//   work/spi-runtime/器件手册对照-华轩阳ICM42688P.md
+	WHO_AM_I           = 0x01,
+
 	ERR_REG            = 0x02,
 	STATUS	           = 0x03,
+
+	// ★ rm2027/fmu-h743（2026-09-30）：本片特有 —— 数据就绪状态 + 「配置是否被器件接受」
+	//   的错误标志（厂商手册 §5.8）。正品 BMI270 的 0x0B 不是这个语义，所以只在兼容件
+	//   分支里读它（见 BMI270::CheckCompatibleDataStat）。
+	DATA_STAT          = 0x0B,
+
+	// ★ rm2027/fmu-h743 板级补丁（2026-09-30）：数据寄存器 0x0C~0x17。
+	// 本板兼容件（华轩阳 HXY「ICM-42688P」）的 FIFO 在 0x1C~0x21（与 BMI270 的 0x46~0x49/
+	// 0x24~0x26 不同地址），驱动当前用"查询方式"定时一次性突发读这 12 个字节
+	// （见 BMI270.cpp 的 STATE::DATA_READ）。
+	// 官方 BMI270 手册写的是 LSB 在前（0x0C=ACC_X_LSB、0x12=GYR_X_LSB），
+	// 【但本板实测是高字节在前（MSB-first）】，厂商手册也把 0x0C 命名为 ACC_XH（高字节在前），
+	// 实测过程与数据见 work/spi-runtime/实现-轮询读数据寄存器.md 与 BMI270.hpp 里的常量注释。
+	DATA_0             = 0x0C, // ACC_X MSB（实测）
+	DATA_1             = 0x0D, // ACC_X LSB
+	DATA_2             = 0x0E, // ACC_Y MSB
+	DATA_3             = 0x0F, // ACC_Y LSB
+	DATA_4             = 0x10, // ACC_Z MSB
+	DATA_5             = 0x11, // ACC_Z LSB
+	DATA_6             = 0x12, // GYR_X MSB
+	DATA_7             = 0x13, // GYR_X LSB
+	DATA_8             = 0x14, // GYR_Y MSB
+	DATA_9             = 0x15, // GYR_Y LSB
+	DATA_10            = 0x16, // GYR_Z MSB
+	DATA_11            = 0x17, // GYR_Z LSB
 
 	EVENT	           = 0x1B,
 
@@ -98,6 +129,18 @@ enum class Register : uint8_t {
 
 
 
+};
+
+// ★ rm2027/fmu-h743（2026-09-30）：DATA_STAT(0x0B) 的位定义 —— 本片（华轩阳 HXY「ICM-42688P」）
+// 特有，见厂商手册 §5.8。两个 *_CONF_ERR 位是芯片在说"你给我的配置我不接受"（配错 ODR/BWP
+// 时它会自动回落到缺省值并置位，见手册 §5.37/§5.39），所以是判断"配置到底生效没有"的第一手证据。
+// ⚠️ 只用于兼容件分支：正品 BMI270 的 0x0B 不是这个寄存器。
+enum DATA_STAT_BIT : uint8_t {
+	gyr_conf_err = Bit5, ///< 陀螺仪配置错误（默认 0）
+	acc_conf_err = Bit4, ///< 加速度计配置错误（默认 0）
+	drdy_tmp     = Bit2, ///< 温度数据转换完成
+	drdy_gyr     = Bit1, ///< 陀螺仪三轴新数据就绪
+	drdy_acc     = Bit0, ///< 加速度计三轴新数据就绪
 };
 
 enum GYR_CONF_BIT : uint8_t {
