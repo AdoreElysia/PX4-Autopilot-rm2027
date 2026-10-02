@@ -1,0 +1,9 @@
+menuconfig SYSTEMCMDS_H104CAP
+	bool "h104cap"
+	default n
+	---help---
+		Enable support for h104cap — H104 (HiPNUC) 外置陀螺串口帧抓取 / 协议探测工具。
+		一次性诊断用：把 USART1 收到的原始字节存进固定 RAM 缓冲，便于 SWD dump。
+
+		符号全名（写进 board 的 default.px4board）：
+		  CONFIG_SYSTEMCMDS_H104CAP=y

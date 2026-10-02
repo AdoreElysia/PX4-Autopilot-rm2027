@@ -3,32 +3,72 @@
 # board specific sensors init
 #------------------------------------------------------------------------------
 #
-# ⚠️⚠️ 本文件是「草稿」，尚未可用 ⚠️⚠️
+# 本板：rm2027/fmu-h743
 #
-# 现状：外设级分配已确认（来自原理图「资源汇总」表），
-#       但 **GPIO 引脚号与 NuttX 总线编号全部未知**（见 ../../README.md）。
+# ⚠️ 跨端提醒：本文件是 Linux/NuttX 侧执行的 shell 脚本，行尾必须是 LF。
 #
-# 下面所有 -b 值都是**占位符**，不是从图纸得到的事实。
-# 在 src/i2c.cpp / src/spi.cpp 写好、总线编号确定之前，
-# 这个文件跑起来会去错的总线上找传感器。
+# ★★★ 2026-09-30 实测确认（用户在 QGC MAVLink Console 逐条敲出来的，不是猜的）★★★
 #
-# 依据：projects/competition/rm2027-drone/firmware/fmu-h743/资源与引脚映射.md
+#   磁罗盘 = Voltafield AF9838（**不是**原理图写的 IST8310），I2C4，7bit 地址 0x0C
+#       af9838  -I -b 4 start            → af9838 #0 on I2C bus 4 address 0xC   ✅
+#       ist8310 -I -b 4 start            → ERROR（IST8310 在 0x0E，本板无）      ❌
+#       ist8308 -I -b 4 start            → ERROR                                ❌
+#       ak09916 / ak8963 -I -b 4 start   → ERROR                                ❌
+#     依据：0x0C 正好是 AF9838 的默认 7bit 地址（af9838_main.cpp 里 I2C_ADDRESS(0x0C)），
+#           而 IST8310/IST8308 都是 0x0E ⇒ 「图纸写 IST8310、实物焊 AF9838」。
+#
+#   气压计 = Goertek SPA06，I2C2，7bit 地址 0x77（驱动默认 0x76 ⇒ 必须显式 -a）
+#       spa06 -I -b 2 -a 0x77 start      → spa06 #0 on I2C bus 2 address 0x77   ✅
+#
+#   IMU    = ★ 已取证（2026-09-30，见 开发日志/09-IMU寄存器指纹.md）：
+#           **BMI270 寄存器图兼容件**（不是 42688-P，也不是 QMI8658）。
+#           证据：SENSORTIME@0x18-0x1A 活计时器、EVENT@0x1B、TEMP@0x22/0x23、
+#                 ACC_CONF@0x40=0xA8、GYR_CONF@0x42=0xA9、AUX_CONF@0x44=0x46、
+#                 FIFO_DOWNS@0x45=0x88、PWR_CONF/PWR_CTRL/CMD@0x7C/0x7D/0x7E
+#                 —— 逐条吻合 Bosch 官方寄存器图；
+#           功能铁证：按 BMI270 写法 PWR_CTRL(0x7D)=0x0E ⇒ 0x0C~0x17 立刻出活的加速度/陀螺数据，
+#                 写回 0 立刻冻结 ⇒ 寄存器图 + 功能 双向吻合。
+#           唯一异常：CHIP_ID(0x00) 读 0x00，而正品 BMI270 必须是 0x24 ⇒ PX4 驱动拒启。
+#           ⚠️⚠️ 【不要】只放宽 PX4 bmi270 驱动的 ID 检查：那会放出它的"微码上传"步骤
+#                 （写 INIT_CTRL(0x59)/INIT_DATA(0x5E) 上传 329 字节配置块），
+#                 实测会把这颗片【锁死】（读全 0xFF），只能靠断电恢复。
+#                 正确方向是"跳过微码上传"的驱动（已证明不上传微码也能出数据）。
+#           取证工具（openocd 脚本）在 work/spi-fingerprint/ —— **只读取证优先**；
+#                 对未知器件的写测试（尤其 0x59/0x5E 配置上传端口）必须先经 Lead/用户同意。
+#
+# 引脚依据：firmware/fmu-h743/引脚映射-H743.md（原理图 V1.0 直读）
+#   引脚经用户人工复核 100% 正确 —— 问题在**型号**，不在引脚。
+#     IMU(?)       SPI1  SCK=PB3  MISO=PA6  MOSI=PD7  CS=PB4  DRDY=PD6
+#     AF9838       I2C4  SCL=PD12 SDA=PD13            @0x0C
+#     SPA06-003    I2C2  SCL=PB10 SDA=PB11            @0x77
 #------------------------------------------------------------------------------
 
 board_adc start
 
-# ICM-42688-P gyro/accel  —— 原理图：SPI1 For ICM 42688（GYRO）
-# TODO(pins): -b 1 是占位；真实 SPI 总线号取决于 src/spi.cpp 里的总线声明顺序
-# TODO(pins): -R 0 是占位；真实值取决于 IMU 在 PCB 上的贴装方向
-icm42688p -s -b 1 -R 0 start
+# IMU: 实物 = BMI270 寄存器图兼容件 on SPI1, CS=PB4(GYRO_CS), DRDY=PD6(GYRO_INT1)（见文件头）
+# ⚠️ 型号已定，但驱动还没改：现有 bmi270 驱动会因 CHIP_ID=0x00 拒启，
+#    而只放宽 ID 检查会让它上传微码把片子锁死 ⇒ 需先改造成"跳过微码"的驱动（方案待 Lead 定）。
+#    这一行暂时保留原驱动名，等驱动改造完再换成 bmi270（并同步改 default.px4board / src/spi.cpp）。
+# ★ 2026-09-30 取证结论：实物是【BMI270 寄存器图兼容件】（CHIP_ID=0x00），不是 42688-P。
+#   驱动侧已打板级补丁：接受 CHIP_ID=0x00 并【跳过微码上传】（上传会锁死器件）。
+#   见 开发日志/09-IMU寄存器指纹.md
+# TODO(上板核对): -R 旋转值取决于 IMU 在 PCB 上的贴装方向，现按 0 占位。
+bmi270 -s -b 1 -R 0 start
 
-# IST8310 magnetometer   —— 原理图：IIC4 For IST8310（Mag）
-# TODO(pins): -b 4 是占位；PX4 的 I2C 总线号是「声明顺序」，不等于外设编号 IIC4
-ist8310 -X -b 4 -R 0 start
+# 磁罗盘: Voltafield AF9838 on I2C4 (PD12/PD13), 7bit 地址 0x0C
+# ★ 实测确认（2026-09-30）：打成 af9838 才起得来；ist8310/ist8308 都起不来。
+# ★ 必须是 -I（internal），不能是 -X（external）：
+#   src/i2c.cpp 里 I2C4 是用 initI2CBusInternal(4) 声明的（板载器件）。
+#   PX4 的 I2CBusIterator 在 -X 时只遍历 topology != Internal 的总线
+#   （platforms/common/i2c.cpp: FilterType::ExternalBus + bus_topology_has_external），
+#   本板一条 external/shared I2C 总线都没有 ⇒ 循环体一次都不执行
+#   ⇒ 直接报 "no instance started (no device on bus?)"，**根本没碰过 I2C4**。
+#   旁证：只有 -X 这条路会打印 WARN（platforms/common/i2c_spi_buses.cpp:766-772），
+#   -I 打的是 ERROR —— 现场 ist8310 报的正是 WARN。
+# ★ 不要改回 ist8310：图纸是错的，实物是 AF9838（0x0E vs 0x0C）。
+af9838 -I -b 4 -R 0 start
 
-# SPA06-003 barometer    —— 原理图：IIC2 For SPA06(Baro)
-# TODO(pins): -b 2 同样是占位
-spa06 -I -b 2 start
-
-# DBUS 遥控器输入        —— 原理图：UART5 for DBUS
-# RC 输入不走这里，走 rc.board_defaults 里的 RC 串口配置（TODO 未完成）
+# 气压计: SPA06-003 on I2C2 (PB10/PB11)
+# ★ 实测确认（2026-09-30）：器件在 0x77，而驱动默认 0x76 ⇒ **必须显式 -a 0x77**，
+#   否则 probe 会去问 0x76、拿 NACK，报 "no instance started"。
+spa06 -I -b 2 -a 0x77 start
