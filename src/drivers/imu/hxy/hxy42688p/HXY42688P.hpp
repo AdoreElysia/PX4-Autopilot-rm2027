@@ -218,6 +218,24 @@ private:
 	bool _data_stat_logged{false};			///< DATA_STAT 首次打印用 PX4_ERR（保证可见），之后无错就降 DEBUG
 	bool _verify_failed{false};			///< 最近一次 Configure() 是否有寄存器没写进去
 
+	// ★ 临时诊断（GYR_CONF 写不进去的定位用）—— `hxy42688p status` 会打印这几个值。
+	//   背景：ST-Link 手工写 0x42 任何值（含 0xCC）都能存住；但驱动跑完 Configure() 后
+	//   0x42 仍是缺省 0xA9，而同一次 Configure() 里的 0x40/0x41/0x7D 都写成功。
+	//   ⇒ 需要把"驱动到底写下去了什么"直接抓出来。
+	uint8_t _dbg_gyr_set{0};
+	uint8_t _dbg_gyr_clr{0};
+	uint8_t _dbg_gyr_orig{0};
+	uint8_t _dbg_gyr_wrote{0};
+	uint8_t _dbg_gyr_rd_imm{0};
+	uint8_t _dbg_gyr_rd_late{0};
+	uint8_t _dbg_pwr_before{0};
+	uint8_t _dbg_pwr_after{0};
+	// ★ 追加（2026-09-30 深夜）：在"所有其它配置都写完之后"再补写一手 GYR_CONF，
+	//   记录这一次写了什么、读回什么。ST-Link 实验（gyrconf-timing.tcl 变体 D）已证：
+	//   PWR_CTRL 已是 0x0E 时写 0x42=0xCC 能稳稳存住。
+	uint8_t _dbg_gyr_wrote2{0};
+	uint8_t _dbg_gyr_rd_final{0};
+
 	enum class STATE : uint8_t {
 		RESET,			// 写 SOFT_RST(0x4A)=0xA5
 		WAIT_FOR_RESET,		// 等 50ms，然后确认 WHO_AM_I(0x01)=0x6A
