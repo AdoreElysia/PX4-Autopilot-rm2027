@@ -1,0 +1,7 @@
+menuconfig DRIVERS_IMU_HIPNUC_H104
+	bool "hipnuc h104 (serial IMU)"
+	default n
+	---help---
+		Enable support for the HiPNUC H104 (HI04M0) external IMU on a serial port.
+		Parses HiPNUC HI91 frames (82 bytes, CRC-16/XMODEM) and publishes
+		sensor_gyro + sensor_accel with a shared device_id.
