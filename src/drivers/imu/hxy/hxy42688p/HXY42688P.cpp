@@ -588,33 +588,94 @@ bool HXY42688P::DataReadPublish(const hrt_abstime &timestamp_sample)
 // ============================================================================
 // 量程 / 缩放（手册 §5.38 / §5.40）
 // ============================================================================
+//
+// ★★ 加速度计增益修正（2026-09-30 深夜 · 上板实测，不是猜的）★★
+//
+// 实测方法（脚本在 projects/competition/rm2027-drone/work/spi-runtime/）：
+//   `rawbyte-dump.tcl` —— 用 ST-Link 手工拉 CS 直读**原始十六进制字节**（绕开驱动的标度）；
+//   `fs-scan.tcl`      —— 板子静止平放（重力在 Z 轴），扫描 ACC_RANGE 四档，读 Z 的原始码。
+//
+// 实测（`gain-scan.tcl`：**读三轴**、每档 **64 样本**、先对轴求平均再取模 ⇒ 消除板子倾斜影响并压噪；
+//      板子静止平放。|a| 就是 1g 对应的原始码 = 该档真实 LSB/g）：
+//
+//   ACC_RANGE   回读    |a| 码(1g)    样本 sd    手册理论码/g    比值
+//   -----------------------------------------------------------------------
+//    0x00     0x00       9334.2       165.9       16384 (±2g)    0.5697
+//    0x01     0x01       4678.0        13.5        8192 (±4g)    0.5710
+//    0x02     0x02       2374.4         8.0        4096 (±8g)    0.5797
+//    0x03     0x03       1213.0        17.9        2048 (±16g)   0.5923
+//
+// 四点最小二乘： **实测码 = 0.5665 × 手册码 + 52.7**（残差 < 0.35%）
+//   ⇒ 纯**增益** 0.5665，外加一个 +53 码的小零偏（≈0.006g @±4g，落在手册 ATyOff ±80mg 内）。
+//   ⇒ 零偏模型被排除：若是零偏，四点应满足"实测 − 手册 = 常数"，
+//      实测却是 −7050 / −3514 / −1722 / −835（随量程同步变）。
+//
+// ⚠️ 曾经怀疑是"干净的二倍"（芯片实际量程粗一档）—— **用数据否掉了**：
+//    若成立则 |a| ÷ (手册/2) 应 = 1.000，实测 1.139 / 1.142 / 1.159 / 1.185，高出 14~19%。
+//    （上一轮只取 3 样本、只读 Z 轴，把 ±8g 那档测成 0.502 的离群点，最小二乘被拉低到 0.569，
+//      才显得"像 0.5"。本表是 64 样本、三轴取模的干净结果。）
+//
+// ★ 修正系数的取法 —— **按器件真实的 counts/g 反推，不是去凑手册**：
+//     真实标度 = 重力 / (1g 对应的码) = 9.80665 m/s² ÷ 4678 码 = 0.0020964 m/s²/码
+//     驾驶假定    = 4g × 9.80665 / 32768            = 0.0011971 m/s²/码
+//     ⇒ 修正 = 0.0020964 / 0.0011971 = **8192 / 4678 = 1.7512**
+//   （若改用四点拟合的斜率 0.5665，则修正 = 1.7653，两者差 0.8%，因为这 53 码零偏
+//     被算进/算出的差别；零偏最终应由六面标定单独估。这里取**工作点(±4g)上使 |a| 精确**
+//     的那个值 1.7512，更保守。）
+//
+// ⚠️ 手册 §2 规格 `ASERR` 灵敏度误差 = **±2%**，实测偏 **43%** ⇒ **器件与手册不符**
+//    （这颗是华轩阳的替代件），不是我们读错。
+// ⚠️ 最终真源仍是六面标定给出的 scale/offset。标定跑通后若 `CAL_ACC*_SCALE` 不接近 1，
+//    说明这条常数该撤。
+static constexpr float ACCEL_GAIN_CORRECTION = 1.7512f;	// = 8192 / 4678（2026-09-30 实测）
+
 void HXY42688P::SetAccelScaleAndRange()
 {
 	// 手册 §5.38：FS[1:0] 00=±2G 01=±4G 10=±8G 11=±16G
 	const uint8_t ACC_RANGE = RegisterRead(Register::ACC_RANGE) & ACC_RANGE_BIT::acc_range_mask;
 
+	// 把"回读到的量程 + 最终标度"打出来 —— 量程回读若抽风（本板实测过 0x40=0xA6、
+	// 0x42/0x43=0xFF 这种坏读），标度会整体差 2 的幂次，必须能一眼看见。
+	const uint8_t acc_range_expected = ACC_RANGE_BIT::acc_range_4g;	// 本驱动配置的就是 ±4g
+	float range_g = 4.f;
+
 	switch (ACC_RANGE) {
 	case ACC_RANGE_BIT::acc_range_2g:
-		_px4_accel.set_scale(2.f * CONSTANTS_ONE_G / 32768.f);
-		_px4_accel.set_range(2.f * CONSTANTS_ONE_G);
+		range_g = 2.f;
 		break;
 
 	case ACC_RANGE_BIT::acc_range_4g:
-		_px4_accel.set_scale(4.f * CONSTANTS_ONE_G / 32768.f);
-		_px4_accel.set_range(4.f * CONSTANTS_ONE_G);
+		range_g = 4.f;
 		break;
 
 	case ACC_RANGE_BIT::acc_range_8g:
-		_px4_accel.set_scale(8.f * CONSTANTS_ONE_G / 32768.f);
-		_px4_accel.set_range(8.f * CONSTANTS_ONE_G);
+		range_g = 8.f;
 		break;
 
 	case ACC_RANGE_BIT::acc_range_16g:
 	default:
-		_px4_accel.set_scale(16.f * CONSTANTS_ONE_G / 32768.f);
-		_px4_accel.set_range(16.f * CONSTANTS_ONE_G);
+		range_g = 16.f;
 		break;
 	}
+
+	const float scale = range_g * CONSTANTS_ONE_G / 32768.f * ACCEL_GAIN_CORRECTION;
+
+	// ★ 满量程也必须跟着改：`set_range()` 决定 `_clip_limit = range/scale × 0.999`（单位=码）。
+	//   既然真实标度是「手册 × 1.7512」，那**真实的物理满量程也是「标称 × 1.7512」**：
+	//     FS=01 名义 ±4g ⇒ 实测 1g=4678 码 ⇒ 32768/4678 = **7.00 g**（四档实测反推：
+	//     3.51 / 7.00 / 13.80 / 27.01 g，而非 2/4/8/16）。
+	//   ⇒ 若只改 scale 不改 range，裁剪阈值会停在 4g×0.999/scale = 18692 码，
+	//     而器件能出到 32767 码 ⇒ **4g~7g 之间会被误报 clip_counter**（上一版就是这个 bug）。
+	const float range_m_s2 = range_g * CONSTANTS_ONE_G * ACCEL_GAIN_CORRECTION;
+	_px4_accel.set_scale(scale);
+	_px4_accel.set_range(range_m_s2);
+
+	PX4_INFO("accel: ACC_RANGE(0x41) read 0x%02x (expected 0x%02x)%s, nominal=+-%.0fg"
+		 " -> real range=+-%.2fg, scale=%.9f m/s^2/LSB (手册值 x %.4f 增益修正)",
+		 (unsigned)ACC_RANGE, (unsigned)acc_range_expected,
+		 (ACC_RANGE == acc_range_expected) ? "" : "  <== 量程回读与写入不一致！标度会差 2 的幂次",
+		 (double)range_g, (double)(range_m_s2 / CONSTANTS_ONE_G), (double)scale,
+		 (double)ACCEL_GAIN_CORRECTION);
 }
 
 void HXY42688P::SetGyroScale()
