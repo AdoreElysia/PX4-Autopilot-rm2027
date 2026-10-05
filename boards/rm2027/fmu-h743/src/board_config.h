@@ -149,9 +149,20 @@
 
 
 /* PWM / DShot **************************************************************
- * 4 路：TIM1_CH1..CH4 = PA8 / PE11 / PE13 / PE14
- * 预留：TIM8_CH3/CH4 = PC8 / PC9（原理图资源表列了，但未接 ESC 座）
- * 这里按已接的 4 路报给上层。
+ * 4 路 ESC 输出 —— 依据 FMU 板网表（Protel 2.0，从客户端导出）的实际连线：
+ *   ESC1 = 座 U13 → PE11 = TIM1_CH2
+ *   ESC2 = 座 U11 → PE13 = TIM1_CH3
+ *   ESC3 = 座 U14 → PC8  = TIM8_CH3   ← 在 TIM8 上，不在 TIM1
+ *   ESC4 = 座 U15 → PC9  = TIM8_CH4   ← 同上
+ * ⇒ 四路横跨 TIM1 + TIM8 两个定时器（详见 src/timer_config.cpp）。
+ * ⚠️ PA8(TIM1_CH1) / PE14(TIM1_CH4) 在图上悬空（网表里各自只有 U1 一个成员），
+ *    **不是** ESC 输出：原理图上作者批注「pa7 pA8 改成timer1ch1一对互补？」，
+ *    说明 PA8 当时被预留作其它用途。
+ * 座子编号 U13/U11/U14/U15 = ESC1..4 由三路证据交叉确定：信号网
+ * ESC_DSHOT1..4、电流采样 ADC1_IN10/IN11/IN4/ADC2_IN8（PC0/PC1/PC4/PC5）、
+ * 遥测串口 UART4/USART6/UART7/UART8 —— 三者的座子顺序一致。
+ * 注：原理图「资源汇总」表把 TIM8_CH3/CH4 列在「All Timer For H Bridge」
+ *     之下，即"供电机驱动使用"，从未标为"预留/未接"。
  */
 #define DIRECT_PWM_OUTPUT_CHANNELS   4
 
