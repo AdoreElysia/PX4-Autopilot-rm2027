@@ -68,7 +68,13 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 
 void board_late_initialize(void)
 {
+#if INTERFACE_USB
+	/* USB CDC-ACM 控制台（sercon_main 定义在 NuttX apps/system/cdcacm）。
+	 * 本板 INTERFACE_USB=0（无 USB 硬件），bootloader 的 defconfig 里也没有 CONFIG_CDCACM
+	 * ⇒ 这一句必须一起关掉，否则链接期报 undefined reference to `sercon_main'。
+	 * 串口上传通道（INTERFACE_USART）不受影响。 */
 	sercon_main(0, NULL);
+#endif
 }
 
 extern void sys_tick_handler(void);

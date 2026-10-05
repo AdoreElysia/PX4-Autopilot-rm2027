@@ -113,6 +113,14 @@
 
 #define SERIAL_BREAK_DETECT_DISABLED   1
 
+/* ★ rm2027/fmu-h743：本板用片内 flash 存参数（见 board_config.h 的 FLASH_BASED_PARAMS），
+ *   让出的是最后一个 128K 扇区 0x081E0000 ⇒ 必须与 script.ld 的 FLASH LENGTH=1792K 同源。
+ *   bootloader 用这个值算 APP_SIZE_MAX（platforms/nuttx/src/bootloader/stm/stm32_common/main.c:86），
+ *   决定它肯接收多大的固件镜像；填 0 会直接撞上同文件 :82 的 #error 守卫，bootloader 编不出来。
+ *   上游同 MCU 的 cbunmanned/h753-som 是同样的写法（其 hw_config.h:55）。
+ */
+#define APP_RESERVATION_SIZE           (1 * 128 * 1024)
+
 #if !defined(ARCH_SN_MAX_LENGTH)
 # define ARCH_SN_MAX_LENGTH 12
 #endif
