@@ -428,8 +428,8 @@
  * SPI1 = ICM-42688-P 陀螺/加计     SCK=PB3  MISO=PA6  MOSI=PD7
  * SPI2 = 空闲                      SCK=PD3  MISO=PC2  MOSI=PC3
  * SPI3 = 空闲                      SCK=PC10 MISO=PC11 MOSI=PB2(AF7)
- * SPI4 = 本板未用（matek 用 PE12/13/14 → 本板 PE13/PE14 是 ESC DShot，
- *        若沿用会与 TIM1_CH3/CH4 抢引脚，故删除）
+ * SPI4 = 本板未用（matek 用 PE12/13/14 → 本板 PE13 是 ESC DShot1(TIM1_CH3)、
+ *        PE14 悬空未接，若沿用会与 TIM1 抢引脚，故删除）
  */
 
 #define ADJ_SLEW_RATE(p) (((p) & ~GPIO_SPEED_MASK) | (GPIO_SPEED_2MHz))
