@@ -67,7 +67,8 @@ IMU     ICM-42688-P      SPI1
 气压计  SPA06-003        IIC2
 外置陀螺 H104            CAN1 / USART1
 遥控    DBUS             UART5
-电机    ESC_DSHOT1..4    TIM1_CH1..CH4
+电机    ESC_DSHOT1..4    TIM1_CH2/CH3 + TIM8_CH3/CH4 = PE11/PE13/PC8/PC9
+                         （★ 跨两个定时器；PA8/PE14 是悬空脚，2026-10-06 修正）
 ```
 
 ## 从参考板抄写时的差异（重要）

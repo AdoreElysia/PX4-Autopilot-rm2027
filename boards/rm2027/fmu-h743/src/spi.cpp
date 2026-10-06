@@ -42,7 +42,7 @@
  *          SCK=PB3  MISO=PA6  MOSI=PD7   CS=PB4(GYRO_CS)   DRDY=PD6(GYRO_INT1)
  *   SPI2 = 空闲（SCK=PD3 MISO=PC2 MOSI=PC3）—— 本板未引出片选，故不声明设备
  *   SPI3 = 空闲（SCK=PC10 MISO=PC11 MOSI=PB2）—— 同上
- *   SPI4 = 本板未用（模板板用 PE12/13/14，本板 PE13/PE14 是 ESC DShot）
+ *   SPI4 = 本板未用（模板板用 PE12/13/14，本板 PE13 是 ESC DShot1、PE14 悬空）
  *
  * ★★ 为什么 SPI1 上一次登记 6 个 IMU 驱动（2026-09-30，T-A）
  *
