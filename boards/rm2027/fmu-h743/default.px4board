@@ -4,16 +4,46 @@ CONFIG_BOARD_SERIAL_TEL1="/dev/ttyS2"   # USART3（本板唯一空闲串口）
 CONFIG_DRIVERS_ADC_BOARD_ADC=y
 CONFIG_DRIVERS_BAROMETER_GOERTEK_SPA06=y
 CONFIG_DRIVERS_DSHOT=y
+# --- IMU（SPI1 / CS=PB4）-----------------------------------------------------
+# ★ 2026-09-30 最终结论（唯一基准 = 厂商手册）：
+#   实物 = 华轩阳（HXY）「ICM-42688P」六轴传感器模块，WHO_AM_I(0x01) = 0x6A；
+#   手册 §4.1 通用寄存器表里【没有 0x00】这个地址（0x00 不是寄存器）。
+#   驱动 = 新建的独立驱动 src/drivers/imu/hxy/hxy42688p（命令名 hxy42688p）：
+#   不共用 Bosch BMI270 驱动、不上传微码、不碰 BMI270 的寄存器图。
+#   依据：projects/competition/rm2027-drone/references/硬件手册/
+#         华轩阳HXY_ICM-42688P_六轴传感器模块_手册.pdf
+#   ⚠️ 硬上限：这些驱动要同时在 src/spi.cpp 里登记 devtype，
+#      而 SPI_BUS_MAX_DEVICES == 6（platforms/common/include/px4_platform_common/spi.h:54，**不可覆盖**）
+#      ⇒ SPI1 上最多只能挂 6 个型号。当前就是 6 个（下面 6 行 + spi.cpp 里对应 6 行），已满。
+CONFIG_DRIVERS_IMU_INVENSENSE_ICM42688P=y   # 原理图标的（实测 probe 失败）
+CONFIG_DRIVERS_IMU_INVENSENSE_ICM42605=y    # 0x75/0x42
+CONFIG_DRIVERS_IMU_INVENSENSE_ICM42670P=y   # 0x75/0x67
+CONFIG_DRIVERS_IMU_INVENSENSE_ICM45686=y    # 0x72/0xE9（ID 寄存器都不同）
+CONFIG_DRIVERS_IMU_HXY_HXY42688P=y          # 华轩阳 HXY「ICM-42688P」：WHO_AM_I(0x01)=0x6A（手册 §5.1）
+CONFIG_DRIVERS_IMU_ST_LSM6DSV=y             # 0x0F/0x70（含 LSM6DSV16X）
+CONFIG_DRIVERS_IMU_HIPNUC_H104=y            # 外置陀螺 H104 (HiPNUC HI04M0) on USART1 = /dev/ttyS0
+# 被"6 个槽位"挤掉、想换的话把上面任意一行换成下面一行即可（同时改 src/spi.cpp）：
+#   CONFIG_DRIVERS_IMU_BOSCH_BMI270=y           # 0x00/0x24（Bosch，首读需 dummy）—— 本板实物不是它
+#   CONFIG_DRIVERS_IMU_INVENSENSE_MPU6000=y     # 0x75/0x68，但封装是 QFN24 4×4 ≠ 本板 14 脚 LGA
+#   CONFIG_DRIVERS_IMU_INVENSENSE_ICM20602=y    # 0x75/0x12，封装 16 脚 3×3 ≠ 本板 14 脚 LGA
+#   CONFIG_DRIVERS_IMU_INVENSENSE_ICM40609D=y   # 0x75/0x3B
+#   CONFIG_DRIVERS_IMU_BOSCH_BMI088=y           # 需要 2 条 CS（本板只有 PB4 一条）⇒ 不可能
+#   CONFIG_DRIVERS_IMU_INVENSENSE_IIM42652=y    # 0x75/0x6F（车规版 42688）
 # --- 磁罗盘 -------------------------------------------------------------------
-# 器件 = iSentek IST8310，I2C4（PD12/PD13），7bit 地址 0x0C。
-#   依据：IST8310 手册 v1.2 §6.4.2 WAI(0x00)=0x10；
-#         §6.1.1 地址表 CAD1=CAD0=VSS ⇒ 7bit = 0CH。
-#   ⚠️ 启动必须显式 -a 0x0C：驱动缺省 0x0E，而 0x0C~0x0F 那圈只写软复位、不读。
-#   ⚠️ 启动必须 -I（internal）：本板一条 external 总线都没有 ⇒ -X 命不中。
 CONFIG_COMMON_MAGNETOMETER=y
-# ★ 上面这行会 select【全部】磁罗盘驱动（src/drivers/magnetometer/Kconfig），
-#   ⇒ 整个 magnetometer 目录下的驱动都会编进固件，不只 IST8310 一颗。
-#   下面这行只是"显式声明板载件"，让配置自解释。
+# ★ 2026-09-30 晚更正：实物是 iSentek IST8310 @I2C4 0x0C（**与原理图一致**）。
+#   此前"实物是 Voltafield AF9838、不是 IST8310"的结论【作废】。
+#   依据 iSentek IST8310 数据手册 v1.2（references/硬件手册/）：
+#     §6.4.2 WAI(0x00) Device ID = 0x10
+#     §6.4.4 输出寄存器 = 0x03~0x08
+#     §6.1.1 从机地址表：CAD1=CAD0=VSS ⇒ 7bit = 0CH
+#   实测已通过（2026-09-30 晚）：`ist8310 -I -b 4 -a 0x0C start`
+#     → device_id Type=0x06(DRV_MAG_DEVTYPE_IST8310) / I2C:4 0x0C，|B|=0.259 G
+#       （probe 校验 WAI==0x10 通过 ⇒ 身份坐实；|B| 已在标定窗口 (0.2,0.7) 内）
+#   ⚠️ 必须显式给 `-a 0x0C`：IST8310 驱动缺省 0x0E，而 0x0C~0x0F 那圈只写软复位、不读。
+# 注意：CONFIG_COMMON_MAGNETOMETER=y 会 `select` 全部磁罗盘驱动
+#       （src/drivers/magnetometer/Kconfig 里 AF9838/IST8310 都在 select 列表里）
+#       ⇒ 两颗都会编进固件。本行只是"显式声明板载件"，让配置自解释。
 CONFIG_DRIVERS_MAGNETOMETER_ISENTEK_IST8310=y
 CONFIG_DRIVERS_PWM_OUT=y
 CONFIG_DRIVERS_RC_INPUT=y

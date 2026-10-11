@@ -1,0 +1,3 @@
+menu "HuaXuanYang (HXY)"
+rsource "*/Kconfig"
+endmenu #HuaXuanYang (HXY)

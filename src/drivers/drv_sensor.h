@@ -104,6 +104,10 @@
 #define DRV_GYR_DEVTYPE_MPU6050  0x35
 #define DRV_IMU_DEVTYPE_MPU6500  0x36
 #define DRV_IMU_DEVTYPE_BMI270   0x37
+// 华轩阳 (HuaXuanYang / HXY) "ICM-42688P" 六轴模块 —— 手册 §5.1：WHO_AM_I(0x01) = 0x6A
+// （独立驱动 src/drivers/imu/hxy/hxy42688p，与 Bosch BMI270 无关）
+#define DRV_IMU_DEVTYPE_HXY42688P 0x39
+#define DRV_IMU_DEVTYPE_HIPNUC_HI04 0x64
 #define DRV_IMU_DEVTYPE_ICM20602 0x38
 
 #define DRV_IMU_DEVTYPE_ICM20608G 0x3A
