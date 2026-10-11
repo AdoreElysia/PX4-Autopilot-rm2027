@@ -2,7 +2,19 @@ CONFIG_BOARD_TOOLCHAIN="arm-none-eabi"
 CONFIG_BOARD_ARCHITECTURE="cortex-m7"
 CONFIG_BOARD_SERIAL_TEL1="/dev/ttyS2"   # USART3（本板唯一空闲串口）
 CONFIG_DRIVERS_ADC_BOARD_ADC=y
+CONFIG_DRIVERS_BAROMETER_GOERTEK_SPA06=y
 CONFIG_DRIVERS_DSHOT=y
+# --- 磁罗盘 -------------------------------------------------------------------
+# 器件 = iSentek IST8310，I2C4（PD12/PD13），7bit 地址 0x0C。
+#   依据：IST8310 手册 v1.2 §6.4.2 WAI(0x00)=0x10；
+#         §6.1.1 地址表 CAD1=CAD0=VSS ⇒ 7bit = 0CH。
+#   ⚠️ 启动必须显式 -a 0x0C：驱动缺省 0x0E，而 0x0C~0x0F 那圈只写软复位、不读。
+#   ⚠️ 启动必须 -I（internal）：本板一条 external 总线都没有 ⇒ -X 命不中。
+CONFIG_COMMON_MAGNETOMETER=y
+# ★ 上面这行会 select【全部】磁罗盘驱动（src/drivers/magnetometer/Kconfig），
+#   ⇒ 整个 magnetometer 目录下的驱动都会编进固件，不只 IST8310 一颗。
+#   下面这行只是"显式声明板载件"，让配置自解释。
+CONFIG_DRIVERS_MAGNETOMETER_ISENTEK_IST8310=y
 CONFIG_DRIVERS_PWM_OUT=y
 CONFIG_DRIVERS_RC_INPUT=y
 CONFIG_COMMON_TELEMETRY=y

@@ -2,31 +2,22 @@
 #
 # board specific sensors init
 #------------------------------------------------------------------------------
+#
+# 本板：rm2027/fmu-h743
+#
+# ⚠️ 跨端提醒：本文件是 Linux/NuttX 侧执行的 shell 脚本，行尾必须是 LF。
+#
+# 器件与地址的唯一基准 = 器件手册：
+#   磁罗盘 = iSentek IST8310，I2C4（PD12/PD13），7bit 地址 0x0C
+#     §6.1.1 地址表：CAD1=CAD0=VSS ⇒ 7bit = 0CH；§6.4.2 WAI(0x00) = 0x10
+#     ⚠️ 必须显式 -a 0x0C：驱动缺省 0x0E；且 0x0C~0x0F 那圈只写软复位、不读
+#     ⚠️ 必须 -I（internal）：本板一条 external 总线都没有 ⇒ -X 命不中
+#   气压计 = Goertek SPA06，I2C2（PB10/PB11），7bit 地址 0x77
+#     驱动缺省 0x76 ⇒ 必须显式 -a 0x77
+#------------------------------------------------------------------------------
 
 board_adc start
 
-# Different board versions have different IMUs, so we try all known options
+ist8310 -I -b 4 -a 0x0C -R 0 start
 
-# Internal SPI bus ICM-42688P (SPI1) on V3 board, PITCH180 orientation
-if ! icm42688p -s -b 1 -R 12 start
-then
-	# Internal SPI bus MPU-6000 on V1.0 and V1.5 boards
-	mpu6000 -s -b 1 -R 12 start
-fi
-
-# Internal SPI bus ICM-42688P (SPI4) on V3 board, PITCH180_YAW90 orientation
-if ! icm42688p -s -b 4 -R 26 start
-then
-	# Internal SPI bus ICM-42605 on V1.5 board, ROTATION_ROLL_180_YAW_270 orientation
-	if ! icm42605 -s -b 4 -R 14 start
-	then
-		# Internal SPI bus ICM-20602 on V1.0 board, PITCH180 orientation
-		icm20602 -s -b 4 -R 12 start
-	fi
-fi
-
-# Internal baro
-dps310 -I start -a 118
-
-# External mag
-qmc5883l -X start -a 13
+spa06 -I -b 2 -a 0x77 start
