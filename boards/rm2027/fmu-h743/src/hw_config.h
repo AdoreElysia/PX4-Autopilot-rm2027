@@ -86,8 +86,14 @@
 
 #define APP_LOAD_ADDRESS               0x08020000
 #define BOOTLOADER_DELAY               5000
-#define INTERFACE_USB                  1
-#define INTERFACE_USB_CONFIG           "/dev/ttyACM0"
+/* ★ 本板（rm2027/fmu-h743）**没有 USB 硬件**
+ *   → 关掉 USB 上传通道，只用串口通道上传固件
+ *   → 串口通道模板板就有（/dev/ttyS0,57600 = USART1 = ttyS0）
+ *   PX4 bootloader 支持 USART 上传（见 platforms/.../bootloader/common/bl.c 的 INTERFACE_USART）
+ */
+#define INTERFACE_USB                  0
+// #define INTERFACE_USB_CONFIG        "/dev/ttyACM0"
+// #define BOARD_VBUS                  MK_GPIO_INPUT(GPIO_OTGFS_VBUS)   /* 本板无 VBUS 检测脚 */
 
 //#define USE_VBUS_PULL_DOWN
 #define INTERFACE_USART                1

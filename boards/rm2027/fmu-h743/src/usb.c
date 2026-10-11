@@ -37,42 +37,15 @@
  * Board-specific USB functions.
  */
 
-#include "board_config.h"
-#include <nuttx/usb/usbdev.h>
-#include <nuttx/usb/usbdev_trace.h>
-#include <stm32_otg.h>
-#include <debug.h>
+#include <px4_platform_common/px4_config.h>
+#include <stm32_gpio.h>
 
-/************************************************************************************
- * Name: stm32_usbinitialize
- *
- * Description:
- *   Called to setup USB-related GPIO pins for the board.
- *
- ************************************************************************************/
-
+/* 本板（rm2027 fmu-h743）**没有 USB**。
+ * 原理图按网络名全表检索无 USB_DP/USB_DM/VBUS。
+ * 因此这里保留一个空实现，仅为了让模板代码里的调用点无需大改。
+ * 连 QGC 走 TELEM 串口 + USB-TTL。
+ */
 __EXPORT void stm32_usbinitialize(void)
 {
-	/* The OTG FS has an internal soft pull-up */
-
-	/* Configure the OTG FS VBUS sensing GPIO, Power On, and Overcurrent GPIOs */
-
-#ifdef CONFIG_STM32F7_OTGFS
-	stm32_configgpio(GPIO_OTGFS_VBUS);
-#endif
-}
-
-/************************************************************************************
- * Name:  stm32_usbsuspend
- *
- * Description:
- *   Board logic must provide the stm32_usbsuspend logic if the USBDEV driver is
- *   used.  This function is called whenever the USB enters or leaves suspend mode.
- *   This is an opportunity for the board logic to shutdown clocks, power, etc.
- *   while the USB is suspended.
- *
- ************************************************************************************/
-__EXPORT void stm32_usbsuspend(FAR struct usbdev_s *dev, bool resume)
-{
-	uinfo("resume: %d\n", resume);
+	/* no USB on this board */
 }

@@ -2,14 +2,12 @@
 #
 # board specific extras init
 #------------------------------------------------------------------------------
-
-# if ! param compare OSD_ATXXXX_CFG 0
-# then
-# 	atxxxx start -s
-# fi
-
-atxxxx start -s
-
-
-# DShot telemetry is always on UART7
-# dshot telemetry -d /dev/ttyS5
+#
+# 本板：rm2027/fmu-h743
+#
+# 模板板的 atxxxx（MAX7456 模拟 OSD）本板没有，已移除。
+# 本板 SPI2/SPI3 空闲且未引出片选，暂不挂任何外设。
+#
+# DShot 遥测：本板 4 路 ESC 各有一路独立串口
+#   ESC1=UART4  ESC2=USART6  ESC3=UART7  ESC4=UART8
+# 具体 /dev/ttySx 编号需按 defconfig 的 UART 使能顺序核对（见开发日志 Q-08）。

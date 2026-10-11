@@ -60,9 +60,9 @@
 #include <px4_platform/gpio.h>
 #include <px4_platform/board_dma_alloc.h>
 
-// # if defined(FLASH_BASED_PARAMS)
-// #  include <parameters/flashparams/flashfs.h>
-// #endif
+#if defined(FLASH_BASED_PARAMS)
+#  include <parameters/flashparams/flashfs.h>
+#endif
 
 __BEGIN_DECLS
 extern void led_init(void);
@@ -184,20 +184,32 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 
 
 #if defined(FLASH_BASED_PARAMS)
-// 	static sector_descriptor_t params_sector_map[] = {
-// 		{6, 128 * 1024, 0x081C0000},
-// 		{7, 128 * 1024, 0x081E0000},
-// 		{0, 0, 0},
-// 	};
+	/* ★ rm2027/fmu-h743：本板【既没有 SD 卡也没有 USB】，参数无处可存 ——
+	 *   不开这个就等于"每次上电参数全丢，标定白做"。所以必须用片内 flash 存。
+	 *
+	 *   扇区选择：STM32H743 是 2MB 双 bank、每 bank 8 个 128K 扇区
+	 *   ⇒ bank2 最后一个扇区 = 扇区 15 = 0x081E0000，正好在 app 区之外。
+	 *   参考同 MCU 的 4 块板子（aedrox/aedroxh7、corvon/743v1、corvon/743v2、
+	 *   cbunmanned/h753-som）全都是【只用一个扇区 {15, 128K, 0x081E0000}】。
+	 *   flashfs 的 get_next_sector_descriptor() 在只有一项时会回到自己，
+	 *   所以单扇区是合法配置（代价：没有扇区级磨损均衡）。
+	 *   配套要求：script.ld 的 FLASH LENGTH 必须从 1920K 缩到 1792K，
+	 *   把 0x081E0000 这个扇区让出来，否则链接器可能把代码放进去、
+	 *   参数写入就会打烂代码。
+	 */
+	static sector_descriptor_t params_sector_map[] = {
+		{15, 128 * 1024, 0x081E0000},
+		{0, 0, 0},
+	};
 
-// 	/* Initialize the flashfs layer to use heap allocated memory */
-// 	int result = parameter_flashfs_init(params_sector_map, NULL, 0);
+	/* Initialize the flashfs layer to use heap allocated memory */
+	int result = parameter_flashfs_init(params_sector_map, NULL, 0);
 
-// 	if (result != OK) {
-// 		syslog(LOG_ERR, "[boot] FAILED to init params in FLASH %d\n", result);
-// 		led_on(LED_BLUE);
-// 		return -ENODEV;
-// 	}
+	if (result != OK) {
+		syslog(LOG_ERR, "[boot] FAILED to init params in FLASH %d\n", result);
+		led_on(LED_BLUE);
+		return -ENODEV;
+	}
 
 #endif
 

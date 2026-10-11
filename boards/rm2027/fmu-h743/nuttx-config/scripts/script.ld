@@ -110,7 +110,7 @@
 MEMORY
 {
 	ITCM_RAM  (rwx) : ORIGIN = 0x00000000, LENGTH =   64K
-	FLASH      (rx) : ORIGIN = 0x08020000, LENGTH = 1920K
+	FLASH      (rx) : ORIGIN = 0x08020000, LENGTH = 1792K /* ★ 最后 1 个 128K 扇区(0x081E0000)让给 flash 参数存储，见 src/init.c */
 
 	DTCM1_RAM (rwx) : ORIGIN = 0x20000000, LENGTH =   64K
 	DTCM2_RAM (rwx) : ORIGIN = 0x20010000, LENGTH =   64K
