@@ -132,8 +132,7 @@ __EXPORT void stm32_boardinitialize(void)
 	/* configure SPI interfaces */
 	stm32_spiinitialize();
 
-	/* configure USB interfaces */
-	stm32_usbinitialize();
+	/* 本板无 USB，不调用 stm32_usbinitialize() */
 
 }
 
@@ -184,7 +183,7 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 #endif
 
 
-// #if defined(FLASH_BASED_PARAMS)
+#if defined(FLASH_BASED_PARAMS)
 // 	static sector_descriptor_t params_sector_map[] = {
 // 		{6, 128 * 1024, 0x081C0000},
 // 		{7, 128 * 1024, 0x081E0000},
@@ -200,7 +199,7 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 // 		return -ENODEV;
 // 	}
 
-// #endif
+#endif
 
 	/* Configure the HW based on the manifest */
 	px4_platform_configure();

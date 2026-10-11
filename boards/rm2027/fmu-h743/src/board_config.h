@@ -56,57 +56,92 @@
 // #define FLASH_BASED_PARAMS
 
 
-/* LEDs are driven with push open drain to support Anode to 5V or 3.3V */
+/* ============================================================================
+ * 本板：rm2027/fmu-h743（自研 STM32H743VIT6 飞控板）
+ *
+ * 引脚来源：原理图 V1.0 图面直读（见仓库 firmware/fmu-h743/引脚映射-H743.md）
+ * 与模板板 matek/h743-slim 的差异集中在本文件 + nuttx-config/include/board.h
+ *
+ * 本板特点：
+ *   · 没有指示灯（原理图零个 LED 网络）
+ *   · 没有蜂鸣器/tone alarm
+ *   · 没有 USB
+ *   · 没有 microSD
+ *   · 有 4 路独立 ESC 电流采样（PC0/PC1/PC4/PC5）
+ *   · 有独立 CAN2 收发器
+ * ========================================================================== */
 
-#define GPIO_nLED_BLUE          /* PE3 */  (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|GPIO_OUTPUT_SET|GPIO_PORTE|GPIO_PIN3)
-#define GPIO_nLED_GREEN         /* PE4 */  (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|GPIO_OUTPUT_SET|GPIO_PORTE|GPIO_PIN4)
+
+/* 指示灯（占位） ************************************************************
+ * 本板**没有硬件 LED**。为规避「PX4 无 0 灯板先例」的构建风险，
+ * 把两个逻辑 LED 映射到原理图上悬空的 PD10 / PD11：
+ * 驱动能跑、能编译，只是物理上看不见。
+ * 真要做指示灯 → 飞线到这两个脚即可，无需改代码。
+ */
+#define GPIO_nLED_BLUE          /* PD10（本板悬空，占位） */  (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_2MHz|GPIO_OUTPUT_SET|GPIO_PORTD|GPIO_PIN10)
+#define GPIO_nLED_GREEN         /* PD11（本板悬空，占位） */  (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_2MHz|GPIO_OUTPUT_SET|GPIO_PORTD|GPIO_PIN11)
 
 #define BOARD_HAS_CONTROL_STATUS_LEDS   1
-#define BOARD_ARMED_STATE_LED           1 // Green LED
-#define BOARD_OVERLOAD_LED              0 // Blue LED
+#define BOARD_ARMED_STATE_LED           1
+#define BOARD_OVERLOAD_LED              0
 
 
-/*
- * ADC channels
+/* ADC 通道 ******************************************************************
+ * 4 路 ESC 电流采样（一路一个）：
+ *   ESC1 → PC0 (ADC1_INP10)      ESC2 → PC1 (ADC1_INP11)
+ *   ESC3 → PC4 (ADC12_INP4)      ESC4 → PC5 (ADC12_INP8)
  *
- * These are the channel numbers of the ADCs of the microcontroller that
- * can be used by the Px4 Firmware in the adc driver
+ * ⚠️ 本板**没有**电池总电压采样（全图未见 VBAT 分压）。因此不定义
+ *    ADC_BATTERY_VOLTAGE_CHANNEL；PX4 的电池模块需据此配置，
+ *    否则会读不到电压。见 firmware/fmu-h743/开发日志/04 的 Q-02b。
  */
-
-/* ADC defines to be used in sensors.cpp to read from a particular channel */
 #define ADC1_CH(n)                  (n)
+#define ADC2_CH(n)                  (n)
 
-/* Define GPIO pins used as ADC N.B. Channel numbers must match below  */
 #define PX4_ADC_GPIO  \
 	/* PC0  */  GPIO_ADC123_INP10, \
 	/* PC1  */  GPIO_ADC123_INP11, \
-	/* PA4  */  GPIO_ADC12_INP18, \
-	/* PA7  */  GPIO_ADC12_INP7, \
-	/* PC4  */  GPIO_ADC12_INP4, \
+	/* PC4  */  GPIO_ADC12_INP4,  \
 	/* PC5  */  GPIO_ADC12_INP8
 
-/* Define Channel numbers must match above GPIO pin IN(n)*/
-#define ADC_BATTERY_VOLTAGE_CHANNEL     /* PC0  */  ADC1_CH(10)
-#define ADC_BATTERY_CURRENT_CHANNEL     /* PC1  */  ADC1_CH(11)
-#define ADC_BATTERY2_VOLTAGE_CHANNEL    /* PA4  */  ADC1_CH(18)
-#define ADC_BATTERY2_CURRENT_CHANNEL    /* PA7  */  ADC1_CH(7)
-#define ADC_AIRSPEED_IN_CHANNEL         /* PC4  */  ADC1_CH(4)
-#define ADC_RSSI_IN_CHANNEL             /* PC5  */  ADC1_CH(8)
+/* 索引 0..3 = ESC1..ESC4 电流（顺序与原理图座子 U13/U11/U14/U15 对应） */
+#define ADC_ESC1_CURRENT_CHANNEL        ADC1_CH(10)
+#define ADC_ESC2_CURRENT_CHANNEL        ADC1_CH(11)
+#define ADC_ESC3_CURRENT_CHANNEL        ADC1_CH(4)
+#define ADC_ESC4_CURRENT_CHANNEL        ADC2_CH(8)
 
 #define ADC_CHANNELS \
-	((1 << ADC_BATTERY_VOLTAGE_CHANNEL) | \
-	 (1 << ADC_BATTERY_CURRENT_CHANNEL) | \
-	 (1 << ADC_BATTERY2_VOLTAGE_CHANNEL) | \
-	 (1 << ADC_BATTERY2_CURRENT_CHANNEL) | \
-	 (1 << ADC_AIRSPEED_IN_CHANNEL) | \
-	 (1 << ADC_RSSI_IN_CHANNEL))
+	((1 << ADC_ESC1_CURRENT_CHANNEL) | \
+	 (1 << ADC_ESC2_CURRENT_CHANNEL) | \
+	 (1 << ADC_ESC3_CURRENT_CHANNEL) | \
+	 (1 << ADC_ESC4_CURRENT_CHANNEL))
 
-/* CAN Silence
+/* ⚠️⚠️ 电池通道「占位」——必须在确认电压来源后修正 ⚠️⚠️
  *
- * Silent mode control \ ESC Mux select
+ * PX4 的 board_common.h 在编译期就要求 ADC_BATTERY_VOLTAGE_CHANNEL /
+ * ADC_BATTERY_CURRENT_CHANNEL 存在，否则 battery_status 模块编不过。
+ * 但本板**没有电池电压采样**（原理图全图未见 VBAT 分压）。
+ *
+ * 因此这里指向 PC0/PC1 —— 请注意它们物理上分别是 ESC1/ESC2 的**电流**采样，
+ * pay 不是电压。为了让 PX4 忽略这块"砖"，同时定义：
+ *     BOARD_ADC_BRICK_VALID 0
+ * 于是模块能编译，但不会把错误的电压当成电池电压参与 failsafe。
+ *
+ * 待硬件确认电压来自哪里（ESC 板经 UART 上报？还是需要飞线？）后：
+ *   1. 修正这两个宏
+ *   2. 把 BOARD_ADC_BRICK_VALID 改回 1（或不定义）
+ * 见 firmware/fmu-h743/开发日志/04-待确认与风险.md 的 Q-02b
  */
+#define ADC_BATTERY_VOLTAGE_CHANNEL     ADC1_CH(10)   /* 占位，物理是 ESC1 电流 */
+#define ADC_BATTERY_CURRENT_CHANNEL     ADC1_CH(11)   /* 占位，物理是 ESC2 电流 */
+#define BOARD_ADC_BRICK_VALID           0             /* 本板无有效电池砖 */
 
-#define GPIO_CAN1_SILENT_S0  /* PD3  */ (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_2MHz|GPIO_OUTPUT_CLEAR|GPIO_PORTD|GPIO_PIN3)
+
+/* CAN **********************************************************************
+ * CAN1 = H104 外置陀螺（PD0/PD1）
+ * CAN2 = 空闲（PB12/PB13）
+ * 本板两路都没有 silent 控制脚（模板板的 PD3 在本板是 SPI2_SCK）
+ */
 
 
 /* PWM
@@ -114,52 +149,43 @@
 #define DIRECT_PWM_OUTPUT_CHANNELS   12
 
 
-/* Spare GPIO */
-
-#define GPIO_VIDEO_PWR          /* PD10 */  (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_2MHz|GPIO_OUTPUT_CLEAR|GPIO_PORTD|GPIO_PIN10)
-#define GPIO_VIDEO_CAM          /* PD11 */  (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_2MHz|GPIO_OUTPUT_CLEAR|GPIO_PORTD|GPIO_PIN11)
-// #define GPIO_PG15               /* PG15 */  (GPIO_INPUT|GPIO_PULLUP|GPIO_PORTG|GPIO_PIN15)
-
-
-/* Tone alarm output */
-
-#define GPIO_TONE_ALARM_IDLE    /* PA15 */ (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_2MHz|GPIO_OUTPUT_CLEAR|GPIO_PORTA|GPIO_PIN15)
-#define GPIO_TONE_ALARM_GPIO    /* PA15 */ (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_2MHz|GPIO_OUTPUT_CLEAR|GPIO_PORTA|GPIO_PIN15)
-
-// #define TONE_ALARM_TIMER        2  /* Timer 2 */
-// #define TONE_ALARM_CHANNEL      1  /* PA15 GPIO_TIM2_CH1OUT_2 */
-// #define GPIO_TONE_ALARM_IDLE    /* PA15 */ (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_2MHz|GPIO_OUTPUT_CLEAR|GPIO_PORTA|GPIO_PIN15)
-// #define GPIO_TONE_ALARM         GPIO_TIM2_CH1OUT_2
-
-
-/* USB OTG FS
- *
- * PE2  OTG_FS_VBUS VBUS sensing
+/* 备用 GPIO（均为本板未连接引脚，留着给上层当普通 IO 用） *******************
+ * 仅列出原理图上确实悬空的脚，避免误驱动已占用引脚。
  */
-
-#define GPIO_OTGFS_VBUS         /* PE2 */ (GPIO_INPUT|GPIO_PULLDOWN|GPIO_SPEED_100MHz|GPIO_PORTE|GPIO_PIN2)
-
-
-/* High-resolution timer */
-#define HRT_TIMER               2  /* use timer8 for the HRT */
-#define HRT_TIMER_CHANNEL       1  /* use capture/compare channel 3 */
+/* 注：PD10/PD11 已被上面的占位 LED 占用，不再作为备用 GPIO */
 
 
-/* RC Serial port */
+/* 蜂鸣器：本板没有 ********************************************************* */
+// #define GPIO_TONE_ALARM_IDLE ...
+// #define GPIO_TONE_ALARM_GPIO ...
+
+
+/* USB：本板没有 ************************************************************ */
+// #define GPIO_OTGFS_VBUS ...
+
+
+/* 高分辨率定时器 ***********************************************************
+ * TIM2 在本板未被占用（原理图「资源汇总」表里没有 TIM2）→ 沿用模板设置。
+ */
+#define HRT_TIMER               2
+#define HRT_TIMER_CHANNEL       1
+
+
+/* RC 串口 ******************************************************************
+ * 本板遥控走 UART5（DBUS）。/dev/ttySx 编号取决于 nuttx defconfig 里的
+ * UART 使能顺序，需在 defconfig 定稿后核对（见开发日志 Q-08）。
+ */
 #define RC_SERIAL_PORT          "/dev/ttyS4"
 #define BOARD_SUPPORTS_RC_SERIAL_PORT_OUTPUT
 
-// #define GPIO_RSSI_IN            /* PC5  */ (GPIO_INPUT|GPIO_PULLUP|GPIO_PORTC|GPIO_PIN5)
+
+/* SD 卡：本板没有 ********************************************************** */
+// #define SDIO_SLOTNO 0
+// #define SDIO_MINOR  0
 
 
-/* SD Card */
-#define SDIO_SLOTNO             0  /* Only one slot */
-#define SDIO_MINOR              0
-
-/* This board provides a DMA pool and APIs */
+/* DMA / 复位 *************************************************************** */
 #define BOARD_DMA_ALLOC_POOL_SIZE 5120
-
-/* This board provides the board_on_reset interface */
 #define BOARD_HAS_ON_RESET 1
 
 
@@ -167,16 +193,13 @@
 		PX4_ADC_GPIO, \
 		GPIO_CAN1_TX, \
 		GPIO_CAN1_RX, \
-		GPIO_CAN1_SILENT_S0, \
+		GPIO_CAN2_TX, \
+		GPIO_CAN2_RX, \
 		GPIO_nLED_BLUE, \
 		GPIO_nLED_GREEN, \
-		GPIO_TONE_ALARM_IDLE, \
-		GPIO_VIDEO_PWR, \
-		GPIO_VIDEO_CAM, \
 	}
 
 #define BOARD_ENABLE_CONSOLE_BUFFER
-
 #define BOARD_NUM_IO_TIMERS 4
 
 
@@ -196,27 +219,11 @@ __BEGIN_DECLS
  * Public Functions
  ****************************************************************************************************/
 
-/****************************************************************************
- * Name: stm32_sdio_initialize
- *
- * Description:
- *   Initialize SDIO-based MMC/SD card support
- *
- ****************************************************************************/
-
-int stm32_sdio_initialize(void);
-
 /****************************************************************************************************
  * Name: stm32_spiinitialize
- *
- * Description:
- *   Called to configure SPI chip select GPIO pins for the board.
- *
  ****************************************************************************************************/
 
 extern void stm32_spiinitialize(void);
-
-extern void stm32_usbinitialize(void);
 
 extern void board_peripheral_reset(int ms);
 

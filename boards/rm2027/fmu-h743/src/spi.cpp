@@ -35,31 +35,17 @@
 #include <drivers/drv_sensor.h>
 #include <nuttx/spi/spi.h>
 
-
+/* 本板 SPI 总线（来源：原理图直读）
+ *
+ *   SPI1 = ICM-42688-P 陀螺/加计
+ *          SCK=PB3  MISO=PA6  MOSI=PD7   CS=PB4(GYRO_CS)   DRDY=PD6(GYRO_INT1)
+ *   SPI2 = 空闲（SCK=PD3 MISO=PC2 MOSI=PC3）—— 本板未引出片选，故不声明设备
+ *   SPI3 = 空闲（SCK=PC10 MISO=PC11 MOSI=PB2）—— 同上
+ *   SPI4 = 本板未用（模板板用 PE12/13/14，本板 PE13/PE14 是 ESC DShot）
+ */
 constexpr px4_spi_bus_t px4_spi_buses[SPI_BUS_MAX_BUS_ITEMS] = {
 	initSPIBus(SPI::Bus::SPI1, {
-		// Matek H743 Slim V1.0 and V1.5
-		initSPIDevice(DRV_IMU_DEVTYPE_MPU6000, SPI::CS{GPIO::PortC, GPIO::Pin15}, SPI::DRDY{GPIO::PortB, GPIO::Pin2}),
-
-		// Matek H743 Slim V3
-		initSPIDevice(DRV_IMU_DEVTYPE_ICM42688P, SPI::CS{GPIO::PortC, GPIO::Pin15}, SPI::DRDY{GPIO::PortB, GPIO::Pin2}),
-	}),
-	initSPIBus(SPI::Bus::SPI2, {
-		initSPIDevice(DRV_OSD_DEVTYPE_ATXXXX, SPI::CS{GPIO::PortB, GPIO::Pin12}),
-	}),
-	initSPIBusExternal(SPI::Bus::SPI3, {
-		initSPIConfigExternal(SPI::CS{GPIO::PortD, GPIO::Pin4}),
-		initSPIConfigExternal(SPI::CS{GPIO::PortE, GPIO::Pin2}),
-	}),
-	initSPIBus(SPI::Bus::SPI4, {
-		// Matek H743 Slim V1.0
-		initSPIDevice(DRV_IMU_DEVTYPE_ICM20602, SPI::CS{GPIO::PortE, GPIO::Pin11}),
-
-		// Matek H743 Slim V1.5
-		initSPIDevice(DRV_IMU_DEVTYPE_ICM42605, SPI::CS{GPIO::PortC, GPIO::Pin13}),
-
-		// Matek H743 Slim V3
-		initSPIDevice(DRV_IMU_DEVTYPE_ICM42688P, SPI::CS{GPIO::PortC, GPIO::Pin13}),
+		initSPIDevice(DRV_IMU_DEVTYPE_ICM42688P, SPI::CS{GPIO::PortB, GPIO::Pin4}, SPI::DRDY{GPIO::PortD, GPIO::Pin6}),
 	}),
 };
 

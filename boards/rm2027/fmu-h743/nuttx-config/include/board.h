@@ -32,8 +32,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  *
  ************************************************************************************/
-#ifndef __NUTTX_CONFIG_MATEKH743SLIM_INCLUDE_BOARD_H
-#define __NUTTX_CONFIG_MATEKH743SLIM_INCLUDE_BOARD_H
+#ifndef __NUTTX_CONFIG_RM2027_FMU_H743_INCLUDE_BOARD_H
+#define __NUTTX_CONFIG_RM2027_FMU_H743_INCLUDE_BOARD_H
 
 /************************************************************************************
  * Included Files
@@ -55,9 +55,15 @@
  ************************************************************************************/
 
 /* Clocking *************************************************************************/
-/* The MatekH743-Slim  board provides the following clock sources:
+/* 本板（rm2027 fmu-h743）时钟源：
  *
- *   X1: 8 MHz crystal for HSE
+ *   X1: 25 MHz crystal for HSE      ← 本板是 25MHz（原理图 X1 / OSC7_IN）
+ *
+ * 原始模板来自 matek/h743-slim（8MHz）。PLL 分频比已按 25MHz 重算，
+ * 但**输出频率与 matek 完全一致**（见下方各 PLL 注释），
+ * 所以 SPI/ADC/FDCAN 等下游行为不变。
+ *
+ * 数据来源：firmware/fmu-h743/引脚映射-H743.md（原理图直读）
  *
  * So we have these clock source available within the STM32
  *
@@ -65,7 +71,7 @@
  *   HSE:  8 MHz crystal for HSE
  */
 
-#define STM32_BOARD_XTAL        8000000ul
+#define STM32_BOARD_XTAL        25000000ul
 
 #define STM32_HSI_FREQUENCY     16000000ul
 #define STM32_LSI_FREQUENCY     32000
@@ -99,11 +105,15 @@
 
 /* PLL1, wide 4 - 8 MHz input, enable DIVP, DIVQ, DIVR
  *
- *   PLL1_VCO = (8,000,000 / 1) * 120 = 960 MHz
+ *   本板 HSE = 25 MHz，PLL1M = 5 → 参考 5 MHz（落在 4-8MHz 档，RGE 不用改）
  *
- *   PLL1P = PLL1_VCO/2  = 960 MHz / 2   = 480 MHz
+ *   PLL1_VCO = (25,000,000 / 5) * 192 = 5 MHz * 192 = 960 MHz
+ *
+ *   PLL1P = PLL1_VCO/2  = 960 MHz / 2   = 480 MHz   ← SYSCLK
  *   PLL1Q = PLL1_VCO/4  = 960 MHz / 4   = 240 MHz
  *   PLL1R = PLL1_VCO/8  = 960 MHz / 8   = 120 MHz
+ *
+ *   ★ 三个输出与 matek(8MHz/M1/N120) 完全一致
  */
 
 #define STM32_PLLCFG_PLL1CFG    (RCC_PLLCFGR_PLL1VCOSEL_WIDE | \
@@ -111,13 +121,13 @@
 				 RCC_PLLCFGR_DIVP1EN | \
 				 RCC_PLLCFGR_DIVQ1EN | \
 				 RCC_PLLCFGR_DIVR1EN)
-#define STM32_PLLCFG_PLL1M       RCC_PLLCKSELR_DIVM1(1)
-#define STM32_PLLCFG_PLL1N       RCC_PLL1DIVR_N1(120)
+#define STM32_PLLCFG_PLL1M       RCC_PLLCKSELR_DIVM1(5)
+#define STM32_PLLCFG_PLL1N       RCC_PLL1DIVR_N1(192)
 #define STM32_PLLCFG_PLL1P       RCC_PLL1DIVR_P1(2)
 #define STM32_PLLCFG_PLL1Q       RCC_PLL1DIVR_Q1(4)
 #define STM32_PLLCFG_PLL1R       RCC_PLL1DIVR_R1(8)
 
-#define STM32_VCO1_FREQUENCY     ((STM32_HSE_FREQUENCY / 1) * 120)
+#define STM32_VCO1_FREQUENCY     ((STM32_HSE_FREQUENCY / 5) * 192)
 #define STM32_PLL1P_FREQUENCY    (STM32_VCO1_FREQUENCY / 2)
 #define STM32_PLL1Q_FREQUENCY    (STM32_VCO1_FREQUENCY / 4)
 #define STM32_PLL1R_FREQUENCY    (STM32_VCO1_FREQUENCY / 8)
@@ -129,32 +139,39 @@
 				  RCC_PLLCFGR_DIVP2EN | \
 				  RCC_PLLCFGR_DIVQ2EN | \
 				  RCC_PLLCFGR_DIVR2EN)
-#define STM32_PLLCFG_PLL2M       RCC_PLLCKSELR_DIVM2(2)
-#define STM32_PLLCFG_PLL2N       RCC_PLL2DIVR_N2(48)
-#define STM32_PLLCFG_PLL2P       RCC_PLL2DIVR_P2(2)
-#define STM32_PLLCFG_PLL2Q       RCC_PLL2DIVR_Q2(2)
-#define STM32_PLLCFG_PLL2R       RCC_PLL2DIVR_R2(2)
+/* 25MHz: M=5→5MHz, N=96→VCO 480MHz, P=Q=R=5 → 96 MHz
+ * ★ 输出 96/96/96 与 matek 一致（SPI123 / SPI45 / ADC 的时钟源）
+ *   matek 原式：M=2,N=48 → VCO 192MHz, /2 = 96MHz
+ */
+#define STM32_PLLCFG_PLL2M       RCC_PLLCKSELR_DIVM2(5)
+#define STM32_PLLCFG_PLL2N       RCC_PLL2DIVR_N2(96)
+#define STM32_PLLCFG_PLL2P       RCC_PLL2DIVR_P2(5)
+#define STM32_PLLCFG_PLL2Q       RCC_PLL2DIVR_Q2(5)
+#define STM32_PLLCFG_PLL2R       RCC_PLL2DIVR_R2(5)
 
-#define STM32_VCO2_FREQUENCY     ((STM32_HSE_FREQUENCY / 2) * 48)
-#define STM32_PLL2P_FREQUENCY    (STM32_VCO2_FREQUENCY / 2)
-#define STM32_PLL2Q_FREQUENCY    (STM32_VCO2_FREQUENCY / 2)
-#define STM32_PLL2R_FREQUENCY    (STM32_VCO2_FREQUENCY / 2)
+#define STM32_VCO2_FREQUENCY     ((STM32_HSE_FREQUENCY / 5) * 96)
+#define STM32_PLL2P_FREQUENCY    (STM32_VCO2_FREQUENCY / 5)
+#define STM32_PLL2Q_FREQUENCY    (STM32_VCO2_FREQUENCY / 5)
+#define STM32_PLL2R_FREQUENCY    (STM32_VCO2_FREQUENCY / 5)
 
 /* PLL3 */
 
 #define STM32_PLLCFG_PLL3CFG    (RCC_PLLCFGR_PLL3VCOSEL_WIDE | \
 				 RCC_PLLCFGR_PLL3RGE_4_8_MHZ | \
 				 RCC_PLLCFGR_DIVQ3EN)
-#define STM32_PLLCFG_PLL3M      RCC_PLLCKSELR_DIVM3(2)
-#define STM32_PLLCFG_PLL3N      RCC_PLL3DIVR_N3(48)
-#define STM32_PLLCFG_PLL3P      RCC_PLL3DIVR_P3(2)
-#define STM32_PLLCFG_PLL3Q      RCC_PLL3DIVR_Q3(4)
-#define STM32_PLLCFG_PLL3R      RCC_PLL3DIVR_R3(2)
+/* 25MHz: M=5→5MHz, N=96→VCO 480MHz, P=5→96, Q=10→48, R=5→96
+ * ★ 输出 96/48/96 与 matek 一致（USB/SDMMC 用；本板两者都没接，但保持合法）
+ */
+#define STM32_PLLCFG_PLL3M      RCC_PLLCKSELR_DIVM3(5)
+#define STM32_PLLCFG_PLL3N      RCC_PLL3DIVR_N3(96)
+#define STM32_PLLCFG_PLL3P      RCC_PLL3DIVR_P3(5)
+#define STM32_PLLCFG_PLL3Q      RCC_PLL3DIVR_Q3(10)
+#define STM32_PLLCFG_PLL3R      RCC_PLL3DIVR_R3(5)
 
-#define STM32_VCO3_FREQUENCY    ((STM32_HSE_FREQUENCY / 2) * 48)
-#define STM32_PLL3P_FREQUENCY   (STM32_VCO3_FREQUENCY / 2)
-#define STM32_PLL3Q_FREQUENCY   (STM32_VCO3_FREQUENCY / 4)
-#define STM32_PLL3R_FREQUENCY   (STM32_VCO3_FREQUENCY / 2)
+#define STM32_VCO3_FREQUENCY    ((STM32_HSE_FREQUENCY / 5) * 96)
+#define STM32_PLL3P_FREQUENCY   (STM32_VCO3_FREQUENCY / 5)
+#define STM32_PLL3Q_FREQUENCY   (STM32_VCO3_FREQUENCY / 10)
+#define STM32_PLL3R_FREQUENCY   (STM32_VCO3_FREQUENCY / 5)
 
 /* SYSCLK = PLL1P = 480MHz
  * CPUCLK = SYSCLK / 1 = 480 MHz
@@ -311,14 +328,22 @@
 
 /* LED index values for use with board_userled() */
 
+/* 本板（rm2027 fmu-h743）**没有指示灯**（原理图零个 LED 网络）。
+ *
+ * 但 PX4 现有板子里没有任何一块是 BOARD_NLEDS=0，为降低构建风险，
+ * 这里保留 2 个"逻辑 LED"，实际映射到**原理图上悬空的两个脚**
+ *   LED_BLUE  → PD10（未连接）
+ *   LED_GREEN → PD11（未连接）
+ * 于是 led 驱动照常编译/运行，只是看不见效果。
+ * 状态只能通过 MAVLink console / 串口观察。
+ */
+
 #define BOARD_LED1        0
 #define BOARD_LED2        1
 #define BOARD_NLEDS       2
 
 #define BOARD_LED_BLUE    BOARD_LED1
 #define BOARD_LED_GREEN   BOARD_LED2
-
-/* LED bits for use with board_userled_all() */
 
 #define BOARD_LED1_BIT    (1 << BOARD_LED1)
 #define BOARD_LED2_BIT    (1 << BOARD_LED2)
@@ -350,28 +375,39 @@
 
 /* Alternate function pin selections ************************************************/
 
+/* 本板 H743 引脚分配（来源：原理图直读，见 firmware/fmu-h743/引脚映射-H743.md）
+ *   USART1 = H104 外置陀螺备用串口   TX=PB6  RX=PA10
+ *   USART2 = 连 F103 伴生 MCU        TX=PD5  RX=PA3
+ */
 #define GPIO_USART1_RX   GPIO_USART1_RX_2   /* PA10 */
-#define GPIO_USART1_TX   GPIO_USART1_TX_2   /* PA9  */
+#define GPIO_USART1_TX   GPIO_USART1_TX_3   /* PB6  ← 本板 */
 
-#define GPIO_USART2_RX   GPIO_USART2_RX_2   /* PD6  */
+#define GPIO_USART2_RX   GPIO_USART2_RX_1   /* PA3  ← 本板 */
 #define GPIO_USART2_TX   GPIO_USART2_TX_2   /* PD5  */
 
 #define GPIO_USART3_RX   GPIO_USART3_RX_3   /* PD9  */
 #define GPIO_USART3_TX   GPIO_USART3_TX_3   /* PD8  */
 
-#define GPIO_UART4_RX    GPIO_UART4_RX_3    /* PB8  */
-#define GPIO_UART4_TX    GPIO_UART4_TX_3    /* PB9  */
+#define GPIO_UART4_RX    GPIO_UART4_RX_1    /* PA11 ← 本板（ESC1 遥测） */
+#define GPIO_UART4_TX    GPIO_UART4_TX_1    /* PA12 ← 本板（AF6） */
 
 #define GPIO_USART6_RX   GPIO_USART6_RX_1   /* PC7  */
 #define GPIO_USART6_TX   GPIO_USART6_TX_1   /* PC6  */
 
 #define GPIO_UART7_RX    GPIO_UART7_RX_3    /* PE7  */
 #define GPIO_UART7_TX    GPIO_UART7_TX_3    /* PE8  */
-#define GPIO_UART7_RTS   GPIO_UART7_RTS_1   /* PE9  */
-#define GPIO_UART7_CTS   GPIO_UART7_CTS_1   /* PE10 */
+/* UART7 RTS/CTS 本板未接（PE9/PE10 悬空），故不定义 */
 
 #define GPIO_UART8_RX    GPIO_UART8_RX_1    /* PE0  */
 #define GPIO_UART8_TX    GPIO_UART8_TX_1    /* PE1  */
+
+/* UART5 —— 本板 DBUS 遥控输入（原理图标注「UART5 for DBUS」）
+ *   TX=PC12  RX=PD2
+ * 注意：NuttX UART 注册顺序 → UART5 对应 /dev/ttyS4，
+ *       与 board_config.h 的 RC_SERIAL_PORT 一致。
+ */
+#define GPIO_UART5_RX    GPIO_UART5_RX_3    /* PD2  ← 本板 */
+#define GPIO_UART5_TX    GPIO_UART5_TX_3    /* PC12 ← 本板 */
 
 
 /* CAN
@@ -379,34 +415,35 @@
  * CAN1 is routed to transceiver.
  */
 
-#define GPIO_CAN1_RX     GPIO_CAN1_RX_3     /* PD0  */
+#define GPIO_CAN1_RX     GPIO_CAN1_RX_3     /* PD0  （H104 外置陀螺） */
 #define GPIO_CAN1_TX     GPIO_CAN1_TX_3     /* PD1  */
 
-/* SPI
+/* CAN2（本板有独立收发器 SIT3051TK，当前空闲） */
+
+#define GPIO_CAN2_RX     GPIO_CAN2_RX_1     /* PB12 ← 本板 */
+#define GPIO_CAN2_TX     GPIO_CAN2_TX_1     /* PB13 ← 本板 */
+
+/* SPI（本板分配，来源：原理图直读）
  *
- * SPI1 is MPU6000
- * SPI2 is MAX7456
- * SPI3 is extern with PD4 and PE2 as CS
- * SPI4 is ICM20602
+ * SPI1 = ICM-42688-P 陀螺/加计     SCK=PB3  MISO=PA6  MOSI=PD7
+ * SPI2 = 空闲                      SCK=PD3  MISO=PC2  MOSI=PC3
+ * SPI3 = 空闲                      SCK=PC10 MISO=PC11 MOSI=PB2(AF7)
+ * SPI4 = 本板未用（matek 用 PE12/13/14，本板这几个脚另有用途）
  */
 
 #define ADJ_SLEW_RATE(p) (((p) & ~GPIO_SPEED_MASK) | (GPIO_SPEED_2MHz))
 
 #define GPIO_SPI1_MISO   GPIO_SPI1_MISO_1               /* PA6  */
 #define GPIO_SPI1_MOSI   GPIO_SPI1_MOSI_3               /* PD7  */
-#define GPIO_SPI1_SCK    ADJ_SLEW_RATE(GPIO_SPI1_SCK_1) /* PA5  */
+#define GPIO_SPI1_SCK    ADJ_SLEW_RATE(GPIO_SPI1_SCK_2) /* PB3  ← 本板 */
 
-#define GPIO_SPI2_MISO   GPIO_SPI2_MISO_1               /* PB14 */
-#define GPIO_SPI2_MOSI   GPIO_SPI2_MOSI_1               /* PB15 */
-#define GPIO_SPI2_SCK    ADJ_SLEW_RATE(GPIO_SPI2_SCK_4) /* PB13 */
+#define GPIO_SPI2_MISO   GPIO_SPI2_MISO_2               /* PC2  ← 本板 */
+#define GPIO_SPI2_MOSI   GPIO_SPI2_MOSI_3               /* PC3  ← 本板 */
+#define GPIO_SPI2_SCK    ADJ_SLEW_RATE(GPIO_SPI2_SCK_5) /* PD3  ← 本板 */
 
-#define GPIO_SPI3_MISO   GPIO_SPI3_MISO_1               /* PB4  */
-#define GPIO_SPI3_MOSI   GPIO_SPI3_MOSI_4               /* PB5  */
-#define GPIO_SPI3_SCK    ADJ_SLEW_RATE(GPIO_SPI3_SCK_1) /* PB3  */
-
-#define GPIO_SPI4_MISO   GPIO_SPI4_MISO_1               /* PE13 */
-#define GPIO_SPI4_MOSI   GPIO_SPI4_MOSI_1               /* PE14 */
-#define GPIO_SPI4_SCK    ADJ_SLEW_RATE(GPIO_SPI4_SCK_1) /* PE12 */
+#define GPIO_SPI3_MISO   GPIO_SPI3_MISO_2               /* PC11 ← 本板 */
+#define GPIO_SPI3_MOSI   GPIO_SPI3_MOSI_3               /* PB2  ← 本板(AF7) */
+#define GPIO_SPI3_SCK    ADJ_SLEW_RATE(GPIO_SPI3_SCK_2) /* PC10 ← 本板 */
 
 /* I2C
  *
@@ -427,6 +464,14 @@
 
 #define GPIO_I2C2_SCL_GPIO                  (GPIO_OUTPUT | GPIO_OPENDRAIN | GPIO_SPEED_50MHz | GPIO_OUTPUT_SET | GPIO_PORTB | GPIO_PIN10)
 #define GPIO_I2C2_SDA_GPIO                  (GPIO_OUTPUT | GPIO_OPENDRAIN | GPIO_SPEED_50MHz | GPIO_OUTPUT_SET | GPIO_PORTB | GPIO_PIN11)
+
+/* I2C4 —— 本板 IST8310 磁罗盘（matek 无此总线，新增） */
+
+#define GPIO_I2C4_SCL GPIO_I2C4_SCL_1       /* PD12 ← 本板 */
+#define GPIO_I2C4_SDA GPIO_I2C4_SDA_1       /* PD13 ← 本板 */
+
+#define GPIO_I2C4_SCL_GPIO                  (GPIO_OUTPUT | GPIO_OPENDRAIN | GPIO_SPEED_50MHz | GPIO_OUTPUT_SET | GPIO_PORTD | GPIO_PIN12)
+#define GPIO_I2C4_SDA_GPIO                  (GPIO_OUTPUT | GPIO_OPENDRAIN | GPIO_SPEED_50MHz | GPIO_OUTPUT_SET | GPIO_PORTD | GPIO_PIN13)
 
 /* SDMMC1
  *
@@ -490,4 +535,4 @@
 # define PROBE_MARK(n)
 #endif
 
-#endif  /*__NUTTX_CONFIG_MATEKH743SLIM_INCLUDE_BOARD_H  */
+#endif  /*__NUTTX_CONFIG_RM2027_FMU_H743_INCLUDE_BOARD_H  */
