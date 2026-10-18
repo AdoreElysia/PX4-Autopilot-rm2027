@@ -494,7 +494,10 @@ void RCInput::Run()
 				_rc_scan_begin = cycle_timestamp;
 				// Configure serial port for SBUS
 				sbus_config(_rcs_fd, board_rc_singlewire(_device));
-				rc_io_invert(true);
+				/* SBUS/W.BUS 正常是反相信号，扫描时要打开 UART RX 反相；
+				 * 但有些接收机（如 WFLY RF209S 直连）输出非反相信号，
+				 * 这时把 RC_INPUT_INVERT 设为 0 即可关掉反相。 */
+				rc_io_invert(_param_rc_input_invert.get() != 0);
 
 				// flush serial buffer and any existing buffered data
 				tcflush(_rcs_fd, TCIOFLUSH);

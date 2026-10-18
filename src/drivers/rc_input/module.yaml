@@ -23,6 +23,22 @@ parameters:
             max: 7
             default: -1
 
+        RC_INPUT_INVERT:
+            description:
+                short: Invert the SBUS/W.BUS input signal
+                long: |
+                    When scanning SBUS (which also covers W.BUS and DJI DBUS)
+                    the driver normally enables UART RX inversion, because
+                    Futaba SBUS is an inverted signal.
+
+                    Set this to 0 if the receiver outputs a NON-inverted
+                    SBUS/W.BUS signal (for example a WFLY RF209S wired
+                    directly to the RC input pin), so the driver reads the
+                    signal without inverting it.
+            category: System
+            type: boolean
+            default: 1
+
 serial_config:
     - command: set RC_INPUT_ARGS "-d ${SERIAL_DEV}"
       port_config_param:

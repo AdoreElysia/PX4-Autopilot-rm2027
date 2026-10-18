@@ -171,6 +171,7 @@ private:
 		(ParamInt<px4::params::RC_RSSI_PWM_CHAN>) _param_rc_rssi_pwm_chan,
 		(ParamInt<px4::params::RC_RSSI_PWM_MIN>) _param_rc_rssi_pwm_min,
 		(ParamInt<px4::params::RC_RSSI_PWM_MAX>) _param_rc_rssi_pwm_max,
-		(ParamInt<px4::params::RC_INPUT_PROTO>) _param_rc_input_proto
+		(ParamInt<px4::params::RC_INPUT_PROTO>) _param_rc_input_proto,
+		(ParamInt<px4::params::RC_INPUT_INVERT>) _param_rc_input_invert
 	)
 };

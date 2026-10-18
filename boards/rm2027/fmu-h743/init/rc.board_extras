@@ -11,3 +11,8 @@
 # DShot 遥测：本板 4 路 ESC 各有一路独立串口
 #   ESC1=UART4  ESC2=USART6  ESC3=UART7  ESC4=UART8
 # 具体 /dev/ttySx 编号需按 defconfig 的 UART 使能顺序核对（见开发日志 Q-08）。
+
+# 遥控链路自检（自研模块）：开机自动运行，把状态写进 RAM 的 rm2027_rc_status，
+# 可用 SWD 直接读；同时在 rc_input 无数据时自动启动"原始串口探针"测两种极性。
+# 注意：本文件是 ROMFS 脚本，注释行之外不能出现非 ASCII 字符（否则构建会中断）。
+rc_throttle start

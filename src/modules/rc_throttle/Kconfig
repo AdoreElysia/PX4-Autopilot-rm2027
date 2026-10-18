@@ -1,0 +1,8 @@
+menuconfig MODULES_RC_THROTTLE
+	bool "rc_throttle"
+	default n
+	---help---
+		RM2027 RC link self-check: print input_rc raw pulse widths and
+		manual_control_setpoint (mapped stick values) so that the RC link
+		and the throttle channel can be verified on the bench.
+		Monitor only - does not drive any actuator.
