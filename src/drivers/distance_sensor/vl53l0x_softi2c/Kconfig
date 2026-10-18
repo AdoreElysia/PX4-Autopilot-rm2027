@@ -1,0 +1,11 @@
+menuconfig DRIVERS_DISTANCE_SENSOR_VL53L0X_SOFTI2C
+	bool "vl53l0x_softi2c"
+	default n
+	---help---
+		Enable support for a VL53L0X time-of-flight distance sensor connected
+		over a software (bit-banged) I2C bus built from two plain GPIOs.
+
+		Needed on boards that do not route a usable hardware I2C bus to a
+		connector (e.g. rm2027/fmu-h743). The board must define
+		BOARD_VL53L0X_SOFTI2C_SCL_PINSET and BOARD_VL53L0X_SOFTI2C_SDA_PINSET
+		in its board_config.h; the pins are usually TEMPORARY.

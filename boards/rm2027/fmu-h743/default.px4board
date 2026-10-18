@@ -47,6 +47,10 @@ CONFIG_COMMON_MAGNETOMETER=y
 #       ⇒ 两颗都会编进固件。本行只是"显式声明板载件"，让配置自解释。
 CONFIG_DRIVERS_MAGNETOMETER_ISENTEK_IST8310=y
 CONFIG_DRIVERS_PWM_OUT=y
+# --- 测距 ---------------------------------------------------------------
+# VL53L0X（软件 I²C，临时占用 U18/PE7/PE8）已于 2026-10-18 测试完成并撤销，
+# 驱动源码保留在 src/drivers/distance_sensor/vl53l0x_softi2c/（不再编译）。
+# 要重新启用 / 或改为硬件 I²C，见 docs/交接-VL53L0X测距-2026-10-18.md。
 CONFIG_DRIVERS_RC_INPUT=y
 CONFIG_COMMON_TELEMETRY=y
 CONFIG_MODULES_ATTITUDE_ESTIMATOR_Q=y

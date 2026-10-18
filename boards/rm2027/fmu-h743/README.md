@@ -1,118 +1,265 @@
-# rm2027/fmu-h743 — 自研飞控板 PX4 板级支持（草稿）
+# rm2027 / fmu-h743 —— 板级说明
 
-> 状态：**骨架 / 不可编译** — 2026-09-28
-> 分支：`board/fmu-h743`（不污染 `main`）
-
-## ⚠️ 先读这段
-
-**这个目录目前还不能编译，也不应该被编译。**
-
-- `default.px4board.wip` 用 `.wip` 后缀，**故意不被 `boards/*/*.px4board` 的 glob 命中**，
-  防止它出现在 `make list_config_targets` / CI 目标枚举里。
-- `init/rc.board_sensors` 里的总线号是**占位符**，不是从原理图得到的。
-- 还缺 `src/board_config.h`、`nuttx-config/`、`src/spi.cpp`、`src/i2c.cpp` 等，
-  没有这些 CMake 根本组不出这个板子。
-
-## 为什么卡住
-
-**GPIO 引脚号无法从原理图 PDF 自动提取**（已实验证伪，见下）。
-需要硬件组提供**网表**或**引脚分配表**才能继续。
-
-详细过程、命令、负结果、决策与回退记录，全部在这个目录里：
-
-```text
-/mnt/h/AI/shared/projects/competition/rm2027-drone/firmware/fmu-h743/
-├── README.md               移植状态总览
-├── 资源与引脚映射.md         ✅ 可靠部分 + ❌ 未知部分
-└── 开发日志/
-    ├── README.md            日志规则（5 问）与索引
-    ├── 01-资料盘点.md
-    ├── 02-原理图信息提取.md   ★ 含「引脚提取失败」的负结果
-    ├── 03-决策记录.md        ★ 含 D-01..D-06 + 2 条返工实录
-    └── 04-待确认与风险.md
-```
-
-## 本目录文件清单与可信度
-
-| 文件 | 状态 | 可信度 |
-|---|---|---|
-| `README.md` | ✅ | — |
-| `default.px4board.wip` | 🟡 草稿 | **串口 `/dev/ttySx` 全是占位**，待 NuttX defconfig 确定后改 |
-| `init/rc.board_sensors` | 🟡 草稿 | 外设归属可信（SPI1/IIC4/IIC2）；**`-b` 总线号是占位** |
-
-### `default.px4board.wip` 里哪些是抄来的、哪些是占位
-
-```text
-可信（来自各驱动 Kconfig 核实）：
-  CONFIG_DRIVERS_IMU_INVENSENSE_ICM42688P=y
-  CONFIG_DRIVERS_MAGNETOMETER_ISENTEK_IST8310=y
-  CONFIG_DRIVERS_BAROMETER_GOERTEK_SPA06=y
-
-占位（必须重定）：
-  CONFIG_BOARD_SERIAL_TEL1..4    ← 取决于 NuttX defconfig 里的 UART 编号
-
-未包含（因为本板没有）：
-  CONFIG_DRIVERS_CDCACM_AUTOSTART   ← 板子无 USB
-  CONFIG_SYSTEMCMDS_USB_CONNECTED   ← 同上
-  CONFIG_DRIVERS_UAVCAN             ← 暂不需要
-```
-
-## 板子事实（依据原理图 V1.0）
-
-```text
-主控    STM32H743VIT6   （本板 = FMU）
-协处理  STM32F103C8T6   （伴生 MCU，经 USART2 连接；不是 PX4IO）
-IMU     ICM-42688-P      SPI1
-磁罗盘  IST8310          IIC4
-气压计  SPA06-003        IIC2
-外置陀螺 H104            CAN1 / USART1
-遥控    DBUS             UART5
-电机    ESC_DSHOT1..4    TIM1_CH2/CH3 + TIM8_CH3/CH4 = PE11/PE13/PC8/PC9
-                         （★ 跨两个定时器；PA8/PE14 是悬空脚，2026-10-06 修正）
-```
-
-## 从参考板抄写时的差异（重要）
-
-参考 `matek/h743-slim`（同为 STM32H743VI）：
-
-```text
-1. 本板无 USB      → 去掉 CDCACM 相关配置
-2. 本板无 microSD  → 去掉 CONFIG_BOARD_PARAM_FILE="/fs/microsd/params"
-3. IMU 只有 ICM-42688P 一颗 → 去掉 mpu6000 / icm20602 / icm42605 兜底
-4. 磁罗盘 IST8310（不是 qmc5883l）
-5. 气压计 SPA06（不是 dps310）
-6. 无 I/O 协处理器 → 不存在 px4io 驱动；MAIN/AUX 之分在本板不适用
-```
-
-## ⚠️ 跨端编辑提醒
-
-本目录的文件属于 **Linux 侧执行的工程**，行尾必须 **LF**：
-
-```text
-init/rc.board_sensors    NuttX nsh 执行的 shell 脚本 —— CRLF 会直接失败
-default.px4board.wip     Kconfig 片段（CRLF 可能被解析出多余字符）
-src/*.cpp / *.h          编译源码
-```
-
-若在 Windows 侧编辑过任何文件，提交前先跑：
-
-```bash
-sed -i 's/\r$//' <file>            # 或 dos2unix <file>
-bash /mnt/h/AI/shared/tools/maintenance/check-lineendings.sh
-```
-
-约定全文：`H:\AI\shared\tools\maintenance\跨端行尾与脚本约定.md`
+> ⚠️ **本文件是新写的，不是从参照板或旧版沿用。**
+> 旧版（`dev` 分支上的 118 行）**已失效**：它仍在描述"骨架 / 尚不可编译"，
+> 而那之后板子早已编出固件、四个传感器也已上板验证。
+> **本文只写"当前成立的事实 + 出处"。**
 
 ---
 
-## 下一步（解锁顺序）
+## 1. 这块板是什么
 
-```text
-[ ] 1. 拿到网表/引脚表（硬件组）                    ← 卡在这
-[ ] 2. src/board_config.h：引脚宏 + PX4_I2C_BUS_* / PX4_SPI_BUS_*
-[ ] 3. src/spi.cpp / src/i2c.cpp：总线与外设声明
-[ ] 4. nuttx-config/：defconfig + include/board.h + scripts/linker.ld
-[ ] 5. src/CMakeLists.txt（px4_add_board）
-[ ] 6. git mv default.px4board.wip default.px4board
-[ ] 7. 编译 → 烧录 → listener sensor_gyro 看到数据
+| 项 | 值 | 依据 |
+|---|---|---|
+| 主控 | **STM32H743VIT6**（LQFP100，cortex-m7） | 数据手册 Figure 5 与网表逐脚核对（12 组全命中） |
+| 晶振 | **HSE 25 MHz**（X1 / OSC7_IN） | 原理图 V1.0 直读 |
+| 协处理 | STM32F103C8T6（经 USART2 连接）—— **不是 PX4IO** | 原理图；本板 `CONFIG_BOARD_IO` 未设 |
+| 板名 | vendor=`rm2027` · model=`fmu-h743` · label=`default` | 目录结构即构建目标名（`Makefile:237` → `px4_config.cmake:74-83`） |
+| 构建目标 | `make rm2027_fmu-h743_default`（app）· `make rm2027_fmu-h743_bootloader` | |
+
+---
+
+## 2. 与参照板（`boards/matek/h743-slim`）的硬件差异
+
+**这是本板与"照抄来的骨架"真正的分界。**
+
+| 部件 | 参照板 | **本板** | 后果 |
+|---|---|---|---|
+| HSE 晶振 | 8 MHz | **25 MHz** | ⇒ PLL 必须重算（见 §3.1） |
+| USB | 有 | **无** | ⇒ bootloader 只走串口；无 USB console |
+| microSD | 有 | **无** | ⇒ 参数只能存片内 flash（见 §3.4） |
+| 板载 IMU | ICM-42688P | ★ **华轩阳 HXY「ICM-42688P」** | **是兼容件**：`WHO_AM_I(0x01)=0x6A`，与 Bosch ICM-42688P **不是同一颗** |
+| 外置 IMU | — | **H104（HiPNUC HI04M0）** on USART1 | 自研驱动 |
+| 磁罗盘 | — | **iSentek IST8310** on I2C4，7bit `0x0C` | 手册 §6.1.1 地址表 |
+| 气压计 | DPS310 | **Goertek SPA06** on I2C2，7bit `0x77` | 驱动缺省 `0x76` ⇒ 必须显式 `-a` |
+| 遥控 | — | **DBUS** on UART5 | |
+| 电机输出 | 12 路 | **4 路 DShot**：TIM1_CH2/CH3 + TIM8_CH3/CH4 | ★ 跨两个定时器（见 §3.2） |
+| LED | — | 2 个逻辑 LED（映射到原理图上悬空的脚） | |
+| I2C4 | 无 | **本板新增**（PD12/PD13） | ★ 曾与定时器表冲突（见 §3.2） |
+
+---
+
+## 3. 已落地的关键判决（都有出处）
+
+### 3.1 时钟：HSE 8 → 25 MHz，但**输出频率不变**
+
+**约束不是"照抄分频比"，而是"输出频率与参照板一致"** —— 否则 SPI/ADC 时钟会跟着偏，
+而现象是"能跑但时序不对"，极难查。
+
 ```
+PLL1: M 1→5, N 120→192  ⇒ VCO 960 MHz 不变 ⇒ SYSCLK 480 MHz 不变
+PLL2: M 2→5, N 48→96,  P/Q/R 2→5 ⇒ 96/96/96 MHz 不变
+PLL3: M 2→5, N 48→96,  P 2→5, Q 4→10, R 2→5 ⇒ 96/48/96 MHz 不变
+```
+依据：`nuttx-config/include/board.h` 逐条注释；晶振频率来自原理图直读。
+
+### 3.2 ★ 4 路 DShot 引脚 —— 这里**错过一次**，务必别照抄别的板
+
+```
+路1 PE11 = TIM1_CH2 → 座 U13      路2 PE13 = TIM1_CH3 → 座 U11
+路3 PC8  = TIM8_CH3 → 座 U14      路4 PC9  = TIM8_CH4 → 座 U15
+```
+- 依据：原理图网表（`ESC_DSHOT1..4` 每条网络是「MCU + 插座」两成员）+ LQFP100 数据手册
+- ★ **旧版是从 `boards/3dr/ctrl-n1` 整段照抄的**，把路 1/4 指到 `PA8`/`PE14`
+  —— 而这两个脚在本板是**单点网络（只有 MCU 一个焊盘，没接任何东西）**，
+  导致那两个座的电调**永远收不到 DShot**。整段照抄时前两路"碰巧对"，
+  把后两路的错藏了很久。
+- ★ 连带：参照板的 12 路表会声明 `PD12–PD15`，而 **`PD12/PD13` 正是磁罗盘的 I2C4**
+  ⇒ 会把磁罗盘抢死。**这就是本板必须有自己那张表的原因。**
+
+### 3.3 串口分配（8 个全开）
+
+| 外设 | 节点 | 用途 |
+|---|---|---|
+| USART1 | `/dev/ttyS0` | H104 外置陀螺 |
+| USART2 | `/dev/ttyS1` | 协处理 F103 |
+| USART3 | `/dev/ttyS2` | **TEL1 → MAVLink** |
+| UART4 / USART6 / UART7 / UART8 | ttyS3 / ttyS5 / ttyS6 / ttyS7 | 4 路 ESC 遥测（预留） |
+| UART5 | `/dev/ttyS4` | DBUS 遥控 |
+
+⇒ `CONFIG_BOARD_SERIAL_TEL1="/dev/ttyS2"`（与 USART3 对齐）。
+
+### 3.4 参数存储：片内 flash 扇区 15
+
+本板无 SD、无 USB ⇒ 参数只能存片内 flash：**扇区 15 = `0x081E0000`，128 K**。
+**三处必须同源**：`script.ld` 的 `FLASH LENGTH = 1792K` + `board_config.h` 的
+`FLASH_BASED_PARAMS` + `init.c` 的 `params_sector_map[]`。
+**缺任何一处**：要么链接器把代码放进参数区（写参数打烂代码），要么参数一断电就丢。
+
+### 3.5 上传通道
+
+无 USB ⇒ bootloader 关掉 USB（`hw_config.h` 的 `INTERFACE_USB 0`）只走串口。
+
+### 3.6 ★ 激光测距 VL53L0X：只能用**软件 I²C**（临时，2026-10-18，**已撤销**）
+
+> **现状（2026-10-18 收尾）**：模块**已验证跑通**（`model_id=0xEE`、20 Hz、0 错误，
+> 实测见 §7），验证完**临时引脚已撤销**：`board_config.h` 的宏、`default.px4board`
+> 的开关、`rc.board_sensors` 的启动行都已删除，**UART7（PE7/PE8）已还给 ESC3 串口遥测**。
+> 驱动源码保留在 `src/drivers/distance_sensor/vl53l0x_softi2c/`（不再编译）。
+> 重新启用的四步 / 以后改硬件 I²C 的清单：
+> `docs/交接-VL53L0X测距-2026-10-18.md` §11.2 / §9。
+>
+> ⚠️ **注意**：下面这段是"当时为什么这么接"的记录；**这些引脚现在没有被占用**。
+
+**结论**：本板**没有把任何一对可做硬件 I²C 的引脚引到插座上**，所以 VL53L0X 走软件 I²C
+（两根 GPIO 拉时序），**临时**占用 **U18 座（UART7）的 4 根线**：
+
+```
+U18 丝印(左→右) 5 / R / T / G  →  模块 VIN / SDA / SCL / GND
+                                  MCU   — / PE7 / PE8 / —
+```
+
+**证据链**（逐条可复查，见 `docs/交接-VL53L0X测距-2026-10-18.md`）：
+
+1. LQFP100 上全部 I²C 可用脚（NuttX `stm32h7x3xx_pinmap.h` 的 I2C 段，去掉本封装没有的 PF/PH）：
+   I2C1 = PB6/PB8 + PB7/PB9、I2C2 = PB10/PB11、I2C3 = PA8 + PC9、I2C4 = PD12/PD13；
+2. 与原理图网表逐座交叉核对（`docs/vl53l0x/FMU_netlist.net`）：
+   **只有 PC9** 引到了插座（U15.3 = ESC4 的 DShot），而它的搭档 **PA8 是悬空单点网络**；
+   PB7/PB8/PB9 只有**底层测试点**（`T17_C1N`/`T16_C1`，PCB 导出件里核对）；
+3. ⇒ 插座上做不出硬件 I²C；而软件 I²C 是**器件手册允许的**：
+   DS11555 Rev6 Table 4 的 `FI2C` **最小 0 Hz**（无最低速度要求）。
+
+**代价（有意接受，因为本来就是临时方案）**：UART7 不能再当串口（ESC3 遥测没了）；
+U14.2 与 U18.2 是同一根线（PE7），别往 U14 接遥测线。
+
+**驱动**：`src/drivers/distance_sensor/vl53l0x_softi2c/`（自研；寄存器序列与上游
+`src/drivers/distance_sensor/vl53l0x/` **逐条对拍一致**，只换了"字节怎么送出去"）。
+板级引脚宏 = `src/board_config.h` 里搜 `临时引脚`。开机启动在 `init/rc.board_sensors` 末行。
+
+**回退**：硬件改版引出真 I²C 后，删驱动目录 + 三处配置，改用上游 `vl53l0x` 驱动
+（清单见 `docs/交接-VL53L0X测距-2026-10-18.md` §9）。
+
+---
+
+## 4. 既有约束（改之前先看这里）
+
+| 约束 | 值 / 规则 | 出处 |
+|---|---|---|
+| **SPI 设备槽位上限** | **6**（不可覆盖） | `platforms/common/include/px4_platform_common/spi.h:54` |
+| **`rc.board_*` 文件名白名单** | 只认 5 个：`early / defaults / sensors / extras / mavlink` | `ROMFS/CMakeLists.txt:196-202` |
+| **ROMFS 脚本非注释行** | **不能有非 ASCII**（否则构建中断） | `Tools/px_romfs_pruner.py:121` |
+| **串口节点编号** | `ttyS<k>` = 从 USART1 数起**第 k+1 个被使能的串口** | `stm32_serial.c:3934-3955`；`SERIAL_DISABLE_REORDERING=y` ⇒ 不受 console 影响，但**关掉任一个口会让后续节点整体前移** |
+| **参数区** | 扇区 15 `0x081E0000`，与 `script.ld` 的 1792K 同源 | §3.4 |
+| **板级 `src/` 目录名** | 必须叫 `src` | `cmake/kconfig.cmake:454-455` |
+| **新驱动目录命名的 7 种候选** | 目录路径必须能被 `kconfig.cmake:197-213` 的 7 种展开之一命中 | 否则 configure 直接 `FATAL_ERROR` |
+| **`CONFIG_SYSTEMCMDS_*`** | **不猜路径**，直拼 `systemcmds/<小写名>` | `kconfig.cmake:258` |
+| **`CONFIG_DRIVERS_*`** | 走 7 种候选路径猜测 | `kconfig.cmake:197-213` |
+
+---
+
+## 5. 哪些是抄的、哪些是算的
+
+| 类别 | 文件 | 说明 |
+|---|---|---|
+| **纯模板（逐字节相同）** | `src/led.c` | 照参照板复制，未改一字 |
+| **骨架照抄、内容重算** | `src/*` 其余 · `nuttx-config/*` | 结构照参照板；**引脚 / 时钟 / 总线 / 外设全部按本板原理图重算** |
+| **本板自研** | `src/drivers/imu/hxy/hxy42688p/` · `src/drivers/imu/hipnuc_h104/` · `src/systemcmds/h104cap/` | 上游没有对应实现 |
+| **有意不含** | `src/drivers/imu/bosch/bmi270/`（兼容件补丁，682 行） | 已推翻的路线，本分支有意不加 |
+| **有意不含** | `extras/*_bootloader.bin` | 见 §6 |
+
+---
+
+## 6. 有意不含的东西（不是遗漏）
+
+| 项 | 状态 | 原因 |
+|---|---|---|
+| `src/drivers/imu/bosch/bmi270/*`（682 行） | **有意不含** | 死路产物（BMI270 兼容件路线已推翻）；`default.px4board` 未选中它 |
+| `extras/rm2027_fmu-h743_bootloader.bin`（38,148 B） | ★ **有意不含** | 见下方 |
+
+**关于 `extras/*`（定案：有意不含）:**
+
+它是**预编译的 bootloader 镜像**，供 ROMFS 的固件升级路径使用
+（`ROMFS/CMakeLists.txt:264` 用 `${VENDOR}_${MODEL}_bootloader.bin` 匹配）。
+**它不是源码、不参与 app 编译** ⇒ 少了它不影响本板启动与飞行，
+只影响"从 ROMFS 里升级 bootloader"这条路。
+
+**为什么有意不含**：往 ROMFS 里塞一个二进制产物，会让**"这棵树能否从源码重建"**
+这个问题变模糊；而本板**已有 SWD**（我们烧固件用的就是它）+ 串口 uploader，
+不需要这条路径。
+
+**★ 恢复它没有不可逆风险 —— 两条路径（任取其一，都指向同一份 38,148 B 镜像）：**
+
+```bash
+# 路径 1：从 dev 分支取
+git checkout dev -- boards/rm2027/fmu-h743/extras/rm2027_fmu-h743_bootloader.bin
+
+# 路径 2：从片内实测 dump 取（已核对与 dev 那份逐字节相同）
+#   work/px4-flash-backup-bootloader-2026-10-11.bin
+```
+
+---
+
+## 7. 上板验证状态（2026-10-11）
+
+| 项 | 实测 | 判据 |
+|---|---|---|
+| 磁罗盘 IST8310 | `Type=0x06` / `I2C:4 (0x0C)` / \|B\|=0.552 G | 身份 + 地址 + 量级 |
+| 板载 HXY42688P | `z = −9.74`，静止陀螺 ≈ 0 | 符号 + 标度 |
+| 外置 H104 | `z = −9.85`；**99.6 Hz**；`crc bad=0` `len bad=0` | 帧率 + 通信质量 |
+| 气压计 SPA06 | `spa06 #0 on I2C bus 2 address 0x77` | |
+| EKF2 姿态 | Roll −0.3° / Pitch 0.8° | |
+| **激光测距 VL53L0X**（2026-10-18，软件 I²C，**测完已撤销**） | `model_id=0xEE`；**19.7~20.0 Hz 连续 30+ 分钟**；`bus_errors=0` / `nacks=0`；距离读数随环境变化。量程 2 m（白墙）/ 20 Hz | 身份 + 帧率 + 通信质量（§3.6，详见交接文档） |
+| **未做** | **电机 / 电调联调**；**原理图↔实物引脚通断复核**；**"手挡距离变化"的人工验证**（TEL1 串口链路还没通，见交接文档 §4.5） | 见 §8 |
+
+---
+
+## 8. 还没做 / 待决
+
+| # | 事项 | 说明 |
+|---|---|---|
+| 1 | **电机 / 电调联调** | 需先设 `PWM_MAIN_TIM0 = -4` 且 `PWM_MAIN_TIM1 = -4`（**DShot300**，一帧 16 bit / 53.3 µs；`dshot.c:308`），`PWM_MAIN_FUNC1..4 = 101..104`；**两组 TIM 必须一致** |
+| 2 | `PWM_MAIN_FUNC` 的默认值 | 默认全 **0 = Disabled** ⇒ 不驱动任何引脚。**在联调前不要随手设它** |
+| 3 | **VL53L0X**（§3.6）—— ✅ **测完并已撤销**（2026-10-18） | 验证结论：`model_id=0xEE`、20 Hz、零错误、读数随目标变化；量程 2 m。临时引脚（U18/PE7/PE8）已还给 UART7。驱动源码保留但不编译；重新启用见交接文档 §11.2 |
+
+### 8.1 ★ 接电机之前的【门槛】：引脚映射必须有实物双证
+
+**这是安全问题，不是便利问题。**
+
+C8/v2 的引脚判决（`PE11/PE13/PC8/PC9` ↔ 座 `U13/U11/U14/U15`），**唯一依据是原理图网表**。
+若"哪只脚到哪个座"在网表上错了，**后果不是"调不出来"，而是电机序号错位 ⇒ 四轴首飞就翻。**
+
+⇒ 站20 那次之所以能藏几个月，正是**从来没有人检验过"插座 ↔ 引脚"**。
+⇒ 本项目自己的纪律（`交接-2026-10-06` §1.9 / `PX4改造-索引与纪律`）：
+  **网表 + 实物通断 双证**，才允许拿这个映射去驱动电机。
+
+**二选一，必须有一样 —— 不许"信网表"直接上四颗电机：**
+
+| 方式 | 做什么 | 代价 | 强度 |
+|---|---|---|---|
+| **(a) 万用表通断** | 断电，量这 6 条：<br>`41(PE11)↔U13.3` **通** · `67(PA8)↔U13.3` **开**<br>`43(PE13)↔U11.3` **通** · `65(PC8)↔U14.3` **通**<br>`66(PC9)↔U15.3` **通** · `44(PE14)↔U15.3` **开** | 30 秒 · 断电 · 不接线 | 验"座 ↔ 脚" |
+| **(b) 单颗电调端到端** | **只接一颗电调到一个座、拆桨、低油门**，看它是否收到输入（AM32 的 `newinput` 是否变化）；**逐座试一遍** | 上电 + 拆桨 | ★ **更强**：验**整条链**（座 → 脚 → 定时器 → DShot → 电调） |
+
+**⇒ 在 (a) 或 (b) 完成前，不要把四颗电机都接上试飞。**
+
+---
+
+## 9. 环境注意
+
+- **构建的 Python 解释器**：PX4 构建可能挑到用户环境里的版本化 python（缺依赖）。
+  用 `-DPYTHON_EXECUTABLE=/usr/bin/python3` 显式钉住；自检脚本：`work/check-px4-python.sh`
+- 本仓库是**浅克隆**：`2c47a16f` 是 shallow root（`git rev-parse 2c47a16f^` 失败）
+  ⇒ 比它更早的上游历史本地不存在
+- **跨端**：`init/rc.board_*` 是 Linux/NuttX 侧 shell 脚本，**行尾必须 LF**
+
+---
+
+## 10. 最终对账表：`git diff --name-only <本分支> dev`
+
+**判据（本项目自定）**：本分支与 `dev` 的**每一个**差异文件，都要能配一句理由。
+理由只有三类：**① 有意不含 · ② 内容有意不同 · ③ 待决**（当前 **0** 个）。
+
+| 文件 | 差异 | 理由 |
+|---|---|---|
+| `README.md` | +88 −141 | ★ **内容有意不同**：`dev` 那 118 行**已失效**（仍在写"骨架 / 尚不可编译"），本分支**新写**了一份准确的（即本文） |
+| `src/drivers/imu/bosch/bmi270/BMI270.cpp` | +462 −12 | **有意不含**：BMI270 兼容件路线已推翻 |
+| `src/drivers/imu/bosch/bmi270/BMI270.hpp` | +177 −3 | **有意不含**：同上 |
+| `src/drivers/imu/bosch/bmi270/Bosch_BMI270_registers.hpp` | +43 −0 | **有意不含**：同上 |
+| `extras/rm2027_fmu-h743_bootloader.bin` | 二进制 38,148 B | **有意不含**：见 §6（含两条恢复路径） |
+
+**⇒ 5 个文件全部有理由，待决 = 0 ⇒「重建无遗漏」判据达成。**
+
+**★ 这条判据的意义（也是它的边界）**：
+它回答的是**"树里有没有漏东西"**。
+而**编译后体积**回答的是另一个问题——**"编译出来的代码等不等价"**。
+两者**不可互相替代**：体积命中**不能**推出树无遗漏
+（不参与编译的文件，体积永远看不见——`README.md` 和 `extras/*` 就是例子）。
