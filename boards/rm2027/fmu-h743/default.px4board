@@ -28,7 +28,17 @@ CONFIG_DRIVERS_IMU_HIPNUC_H104=y            # 外置陀螺 H104 (HiPNUC HI04M0) 
 #   CONFIG_DRIVERS_IMU_INVENSENSE_MPU6000=y     # 0x75/0x68，但封装是 QFN24 4×4 ≠ 本板 14 脚 LGA
 #   CONFIG_DRIVERS_IMU_INVENSENSE_ICM20602=y    # 0x75/0x12，封装 16 脚 3×3 ≠ 本板 14 脚 LGA
 #   CONFIG_DRIVERS_IMU_INVENSENSE_ICM40609D=y   # 0x75/0x3B
-#   CONFIG_DRIVERS_IMU_BOSCH_BMI088=y           # 需要 2 条 CS（本板只有 PB4 一条）⇒ 不可能
+# --- IMU-B（SPI2）：Bosch BMI088 -----------------------------------------------
+# ★ 2026-10-30 新增 —— 10-24 版 FMU_1 多了一颗 BMI088（旧板没有）。
+#   旧板那句「本板只有 PB4 一条 CS ⇒ 不可能」已被新板推翻：
+#   新板 CSB1=PC0、CSB2=PC1，SPI2 = PD3/PC2_C/PC3_C。
+#   两个选项必须都开：-A（加速度计 CSB1）与 -G（陀螺仪 CSB2）是同一颗
+#   芯片里的两 die，驱动代码按 devtype 分支（BMI088.cpp:43/46）。
+#   中断脚：加速度计 INT1=PE3，陀螺仪 INT3=PE4（必须与 spi.cpp 里的 DRDY 一致）。
+#   ⚠️ PC2_C/PC3_C 是带模拟开关的模拟脚，NuttX 没有闭合开关的代码 —— 见 board README §3.1。
+CONFIG_DRIVERS_IMU_BOSCH_BMI088=y
+CONFIG_BMI088_ACCELEROMETER_INT1=y
+CONFIG_BMI088_GYROSCOPE_INT3=y
 #   CONFIG_DRIVERS_IMU_INVENSENSE_IIM42652=y    # 0x75/0x6F（车规版 42688）
 # --- 磁罗盘 -------------------------------------------------------------------
 CONFIG_COMMON_MAGNETOMETER=y

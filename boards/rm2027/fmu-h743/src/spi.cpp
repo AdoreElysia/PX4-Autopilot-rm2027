@@ -109,6 +109,37 @@ constexpr px4_spi_bus_t px4_spi_buses[SPI_BUS_MAX_BUS_ITEMS] = {
 		//    ⚠️ 常量名是 DRV_IMU_DEVTYPE_ST_LSM6DSV（带 ST_ 前缀，drv_sensor.h:73），不是 DRV_IMU_DEVTYPE_LSM6DSV
 		initSPIDevice(DRV_IMU_DEVTYPE_ST_LSM6DSV, SPI::CS{GPIO::PortB, GPIO::Pin4}, SPI::DRDY{GPIO::PortD, GPIO::Pin6}),
 	}),
+
+	/* ★ SPI2 = 第二颗板载 IMU：Bosch BMI088（2026-10-30 按 10-24 版 FMU_1 网表新增）
+	 *
+	 * 引脚（`PAD_NET` 硬证据，详见 work/FMU2-引脚识别-20261030/）：
+	 *   SCK   PD3(84)    MISO PC2_C(17)   MOSI PC3_C(18)
+	 *   加速度计 CS = PC0(15) = 网络 CSB1    DRDY = PE3(2) = 网络 INT1
+	 *   陀螺仪   CS = PC1(16) = 网络 CSB2    DRDY = PE4(3) = 网络 INT3
+	 *
+	 * ★ BMI088 是【两颗独立的 die】共用一组 SPI 线：
+	 *     加速度计 = SPI 从机，CSB1，中断 INT1/INT2
+	 *     陀螺仪   = SPI 从机，CSB2，中断 INT3/INT4
+	 *   所以这里必须登记【两条】initSPIDevice（ACC 与 GYR 各一条），
+	 *   不能像单芯片 IMU 那样只登记一条。驱动的 -A / -G 分别对应这两条。
+	 *
+	 * ★ 中断脚选型（Kconfig 的四个选项刚好对上本板）：
+	 *     加速度计 → BMI088_ACCELEROMETER_INT1 → PE3
+	 *     陀螺仪   → BMI088_GYROSCOPE_INT3     → PE4
+	 *   PE2(INT2) 与 PE5(INT4) 本板也接了，但**没有**对应驱动入口，
+	 *   留着当备选/调试用；不要把它们登记成 DRDY，否则两个中断抢同一路数据。
+	 *
+	 * ⚠️⚠️ 读这一行之前先看 board README §3.1：`PC2_C`/`PC3_C` 是带模拟开关的模拟脚，
+	 *   手册要求先闭合 SYSCFG 的开关才会把 SPI2 功能引到 `_C` 脚上，
+	 *   而 NuttX 目前**没有**这段代码。若 SPI2 挂上去读不到 WHO_AM_I，
+	 *   先怀疑这一点，不要先怀疑驱动或焊接。
+	 */
+	initSPIBus(SPI::Bus::SPI2, {
+		// 加速度计：CS=PC0(CSB1)，DRDY=PE3(INT1)
+		initSPIDevice(DRV_ACC_DEVTYPE_BMI088, SPI::CS{GPIO::PortC, GPIO::Pin0}, SPI::DRDY{GPIO::PortE, GPIO::Pin3}),
+		// 陀螺仪：  CS=PC1(CSB2)，DRDY=PE4(INT3)
+		initSPIDevice(DRV_GYR_DEVTYPE_BMI088, SPI::CS{GPIO::PortC, GPIO::Pin1}, SPI::DRDY{GPIO::PortE, GPIO::Pin4}),
+	}),
 };
 
 static constexpr bool unused = validateSPIConfig(px4_spi_buses);

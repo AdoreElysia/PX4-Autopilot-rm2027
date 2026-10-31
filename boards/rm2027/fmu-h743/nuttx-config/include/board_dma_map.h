@@ -37,6 +37,14 @@
 #define DMAMAP_SPI1_RX    DMAMAP_DMA12_SPI1RX_0 /* DMA1:37 */
 #define DMAMAP_SPI1_TX    DMAMAP_DMA12_SPI1TX_0 /* DMA1:38 */
 
+// SPI2 = Bosch BMI088（2026-10-30 新增）。
+// 必须有这两行：NuttX 的 stm32_spi.c:479-480 在编译期就引用
+// DMAMAP_SPI2_RX/TX，缺了会直接 `error: 'DMAMAP_SPI2_RX' undeclared`
+// （而不是运行时报错）。
+// 选 _0（DMA1）与本板 SPI1 同源，与 3dr/ctrl-n1、accton/ga1、aedrox/aedroxh7 一致。
+#define DMAMAP_SPI2_RX    DMAMAP_DMA12_SPI2RX_0 /* DMA1:39 */
+#define DMAMAP_SPI2_TX    DMAMAP_DMA12_SPI2TX_0 /* DMA1:40 */
+
 
 // DMAMUX2
 #define DMAMAP_SPI4_RX    DMAMAP_DMA12_SPI4RX_1 /* DMA2:83 */

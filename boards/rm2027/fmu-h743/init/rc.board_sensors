@@ -84,6 +84,21 @@ board_adc start
 #      可能是手在动（两条报文差 37 ms），也可能是该通道增益异常，**尚未定论**。
 hxy42688p -s -b 1 -R 6 start
 
+# 板载 IMU-B: Bosch BMI088 on SPI2（2026-10-30 新增）
+#   颜色分开写：BMI088 是两颗 die 共用一组 SPI 线，
+#   -A = 加速度计（CS=PC0/CSB1，DRDY=PE3/INT1）
+#   -G = 陀螺仪  （CS=PC1/CSB2，DRDY=PE4/INT3）
+#   必须起两次，少一次就只有半个 IMU。
+#   -b 2 = SPI2（总线号 = 外设号，与 i2c.cpp/spi.cpp 一致）。
+#   -s = 同步模式（与 hxy42688p 一致，便于两路 IMU 时间对齐）。
+#   -R 0 = 本板贴装方向尚未实测，先保持 0；若标定报 invalid orientation
+#         再按 hxy42688p 那一段的方法用 H104 当参照重定。
+#   ⚠️ PC2_C/PC3_C 需要 SYSCFG 模拟开关才能出 SPI2 功能，
+#      NuttX 目前没有这段代码 —— 若下面两行都报
+#      "no instance started"，先去看 board README §3.1，不要先怀疑驱动。
+bmi088 -A -s -b 2 -R 0 start
+bmi088 -G -s -b 2 -R 0 start
+
 # 磁罗盘: iSentek IST8310 on I2C4 (PD12/PD13), 7bit 地址 0x0C
 # ★ 实测确认（2026-09-30）：打成 af9838 起得来 —— 但那是**错驱动认错了芯片**，
 #   af9838.cpp 的 probe() 不校验 ID（只确认 I2C 有应答）。
