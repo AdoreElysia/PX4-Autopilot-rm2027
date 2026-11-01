@@ -91,13 +91,13 @@ hxy42688p -s -b 1 -R 6 start
 #   必须起两次，少一次就只有半个 IMU。
 #   -b 2 = SPI2（总线号 = 外设号，与 i2c.cpp/spi.cpp 一致）。
 #   -s = 同步模式（与 hxy42688p 一致，便于两路 IMU 时间对齐）。
-#   -R 0 = 本板贴装方向尚未实测，先保持 0；若标定报 invalid orientation
-#         再按 hxy42688p 那一段的方法用 H104 当参照重定。
+#   -R 6 = 已由六面标定验证通过（YAW_270）。之前 -R 0 会报
+#         "accel 0 invalid X-axis"，改 6 后加计/陀螺与 H104 同向。
 #   ⚠️ PC2_C/PC3_C 需要 SYSCFG 模拟开关才能出 SPI2 功能，
 #      NuttX 目前没有这段代码 —— 若下面两行都报
 #      "no instance started"，先去看 board README §3.1，不要先怀疑驱动。
-bmi088 -A -s -b 2 -R 0 start
-bmi088 -G -s -b 2 -R 0 start
+bmi088 -A -s -b 2 -R 6 start
+bmi088 -G -s -b 2 -R 6 start
 
 # 磁罗盘: iSentek IST8310 on I2C4 (PD12/PD13), 7bit 地址 0x0C
 # ★ 实测确认（2026-09-30）：打成 af9838 起得来 —— 但那是**错驱动认错了芯片**，
