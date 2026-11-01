@@ -36,23 +36,31 @@
 
 /* 本板 IO 定时器 —— ★ 引脚表以【本板原理图网表】为准，不要从别的板复制。
  *
- *   ESC 插座 → 网络 → H7 引脚 → 定时器通道：
- *     U13.pin3  ESC_DSHOT1  PE11  TIM1_CH2
- *     U11.pin3  ESC_DSHOT2  PE13  TIM1_CH3
- *     U14.pin3  ESC_DSHOT3  PC8   TIM8_CH3
- *     U15.pin3  ESC_DSHOT4  PC9   TIM8_CH4
+ *   v2 板 P1（1x8P SH，4 合 1 ESC）→ 网络 → H7 引脚 → 定时器通道：
+ *     P1.8  ESC_DSHOT1  PE13  TIM1_CH3
+ *     P1.7  ESC_DSHOT2  PE11  TIM1_CH2
+ *     P1.6  ESC_DSHOT3  PC8   TIM8_CH3
+ *     P1.5  ESC_DSHOT4  PC9   TIM8_CH4
  *
- * ★★ 2026-10-06 修正（此前是错的，会害死人）：
+ * ★★ 2026-10-06 修正（PA8/PE14 悬空，旧板）：
  *   旧版写 "DShot1..4 = TIM1_CH1..CH4 = PA8 / PE11 / PE13 / PE14"，
- *   那是从 boards/3dr/ctrl-n1 整段照抄来的。PE11/PE13 两根恰好与本板一致，
- *   所以前两路能转、看着"没问题"，把另两根的错误藏了很久。
- *   实测（原理图网表 + fmu_2026-09-24.pdf 双证）：PA8(网络名 TIM1_CH1) 与
+ *   那是从 boards/3dr/ctrl-n1 整段照抄来的。实测 PA8(网络名 TIM1_CH1) 与
  *   PE14(网络名 TIM1_CH4) 都是【单点网络】—— 整条网只有 MCU 自己一个焊盘，
  *   没有接到任何 ESC 座 ⇒ 旧版第 1/第 4 路打在悬空脚上，插在那两个座的
  *   电调永远收不到 DShot。
  *
+ * ★★ 2026-10-31 v2 板修正（P1 的 DSHOT1/2 顺序）：
+ *   v2 板把四路 ESC 合成一个 8 针 4 合 1 座 P1：P1.8=DSHOT1、P1.7=DSHOT2、
+ *   P1.6=DSHOT3、P1.5=DSHOT4。MCU 侧网络是 DSHOT1=PE13(TIM1_CH3)、
+ *   DSHOT2=PE11(TIM1_CH2) ⇒ 前两路输出必须按 P1.8/P1.7 写成
+ *   【CH3 在前、CH2 在后】，否则 PWM_MAIN_FUNC1/2 = Motor1/2 会在
+ *   P1.7/P1.8 上交叉，四轴首飞必翻。
+ *   旧板（U13/U11/U14/U15 四个独立座）的顺序是 PE11=DSHOT1、PE13=DSHOT2；
+ *   v2 板不是这个顺序，不要再照旧板写。
+ *
  *   本板 DShot 实际跨【两个】定时器，所以 io_timers[] 必须有两条：
- *     TIM1 只用 CH2/CH3（CH1 空着）、TIM8 只用 CH3/CH4（CH1/CH2 空着）
+ *     TIM1 只用 CH2/CH3（CH1 空着；数组顺序是 CH3、CH2，对应 P1.8/P1.7），
+ *     TIM8 只用 CH3/CH4（CH1/CH2 空着）
  *   通道有缺口是 PX4 明确支持的：io_timer.c:624/646 会取组内最低通道号设 rDCR，
  *   dshot.c:349/392 用 channel_count_including_gaps。
  *   上游同类先例（前 4 路主输出跨多定时器）共 19 块板，最像的是
@@ -81,10 +89,10 @@ constexpr io_timers_t io_timers[MAX_IO_TIMERS] = {
 };
 
 constexpr timer_io_channels_t timer_io_channels[MAX_TIMER_IO_CHANNELS] = {
-	initIOTimerChannel(io_timers, {Timer::Timer1, Timer::Channel2}, {GPIO::PortE, GPIO::Pin11}),  /* 路1 ESC_DSHOT1 → U13 */
-	initIOTimerChannel(io_timers, {Timer::Timer1, Timer::Channel3}, {GPIO::PortE, GPIO::Pin13}),  /* 路2 ESC_DSHOT2 → U11 */
-	initIOTimerChannel(io_timers, {Timer::Timer8, Timer::Channel3}, {GPIO::PortC, GPIO::Pin8}),   /* 路3 ESC_DSHOT3 → U14 */
-	initIOTimerChannel(io_timers, {Timer::Timer8, Timer::Channel4}, {GPIO::PortC, GPIO::Pin9}),   /* 路4 ESC_DSHOT4 → U15 */
+	initIOTimerChannel(io_timers, {Timer::Timer1, Timer::Channel3}, {GPIO::PortE, GPIO::Pin13}),  /* 路1 ESC_DSHOT1 → P1.8 */
+	initIOTimerChannel(io_timers, {Timer::Timer1, Timer::Channel2}, {GPIO::PortE, GPIO::Pin11}),  /* 路2 ESC_DSHOT2 → P1.7 */
+	initIOTimerChannel(io_timers, {Timer::Timer8, Timer::Channel3}, {GPIO::PortC, GPIO::Pin8}),   /* 路3 ESC_DSHOT3 → P1.6 */
+	initIOTimerChannel(io_timers, {Timer::Timer8, Timer::Channel4}, {GPIO::PortC, GPIO::Pin9}),   /* 路4 ESC_DSHOT4 → P1.5 */
 };
 
 constexpr io_timers_channel_mapping_t io_timers_channel_mapping =
