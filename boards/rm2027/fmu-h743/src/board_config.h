@@ -91,54 +91,28 @@
 
 
 /* ADC 通道 ******************************************************************
- * 4 路 ESC 电流采样（一路一个）：
- *   ESC1 → PC0 (ADC1_INP10)      ESC2 → PC1 (ADC1_INP11)
- *   ESC3 → PC4 (ADC12_INP4)      ESC4 → PC5 (ADC12_INP8)
+ * v2 板（FMU_1）实际只有一路电池电压检测：
+ *   VIN → R32 47K → PC4/ADC1_IN4 → R33 4.7K → GND，C6 100nF 滤波
+ *   分压比 = (47K + 4.7K) / 4.7K = 11:1；3.3V ADC 对应最高约 36.3V。
  *
- * ⚠️ 本板**没有**电池总电压采样（全图未见 VBAT 分压）。因此不定义
- *    ADC_BATTERY_VOLTAGE_CHANNEL；PX4 的电池模块需据此配置，
- *    否则会读不到电压。见 firmware/fmu-h743/开发日志/04 的 Q-02b。
+ * v2 FMU 没有 ESC 电流采样：PC0/PC1/PC5 均无外接（PC5/ADC2_IN8 只有 U1
+ * 一个焊盘）。旧板的 4 路 ESC 电流表已作废；PC1 只保留为
+ * ADC_BATTERY_CURRENT_CHANNEL 的占位通道，配 BAT1_A_PER_V=0 时电流为 0。
  */
 #define ADC1_CH(n)                  (n)
 #define ADC2_CH(n)                  (n)
 
 #define PX4_ADC_GPIO  \
-	/* PC0  */  GPIO_ADC123_INP10, \
 	/* PC1  */  GPIO_ADC123_INP11, \
-	/* PC4  */  GPIO_ADC12_INP4,  \
-	/* PC5  */  GPIO_ADC12_INP8
+	/* PC4  */  GPIO_ADC12_INP4
 
-/* 索引 0..3 = ESC1..ESC4 电流（顺序与原理图座子 U13/U11/U14/U15 对应） */
-#define ADC_ESC1_CURRENT_CHANNEL        ADC1_CH(10)
-#define ADC_ESC2_CURRENT_CHANNEL        ADC1_CH(11)
-#define ADC_ESC3_CURRENT_CHANNEL        ADC1_CH(4)
-#define ADC_ESC4_CURRENT_CHANNEL        ADC2_CH(8)
+#define ADC_BATTERY_VOLTAGE_CHANNEL     ADC1_CH(4)    /* PC4，VIN 分压 47K/4.7K */
+#define ADC_BATTERY_CURRENT_CHANNEL     ADC1_CH(11)   /* PC1 占位，无电流检测 */
+#define BOARD_ADC_BRICK_VALID           1             /* v2 板电池电压检测有效 */
 
 #define ADC_CHANNELS \
-	((1 << ADC_ESC1_CURRENT_CHANNEL) | \
-	 (1 << ADC_ESC2_CURRENT_CHANNEL) | \
-	 (1 << ADC_ESC3_CURRENT_CHANNEL) | \
-	 (1 << ADC_ESC4_CURRENT_CHANNEL))
-
-/* ⚠️⚠️ 电池通道「占位」——必须在确认电压来源后修正 ⚠️⚠️
- *
- * PX4 的 board_common.h 在编译期就要求 ADC_BATTERY_VOLTAGE_CHANNEL /
- * ADC_BATTERY_CURRENT_CHANNEL 存在，否则 battery_status 模块编不过。
- * 但本板**没有电池电压采样**（原理图全图未见 VBAT 分压）。
- *
- * 因此这里指向 PC0/PC1 —— 请注意它们物理上分别是 ESC1/ESC2 的**电流**采样，
- * pay 不是电压。为了让 PX4 忽略这块"砖"，同时定义：
- *     BOARD_ADC_BRICK_VALID 0
- * 于是模块能编译，但不会把错误的电压当成电池电压参与 failsafe。
- *
- * 待硬件确认电压来自哪里（ESC 板经 UART 上报？还是需要飞线？）后：
- *   1. 修正这两个宏
- *   2. 把 BOARD_ADC_BRICK_VALID 改回 1（或不定义）
- * 见 firmware/fmu-h743/开发日志/04-待确认与风险.md 的 Q-02b
- */
-#define ADC_BATTERY_VOLTAGE_CHANNEL     ADC1_CH(10)   /* 占位，物理是 ESC1 电流 */
-#define ADC_BATTERY_CURRENT_CHANNEL     ADC1_CH(11)   /* 占位，物理是 ESC2 电流 */
-#define BOARD_ADC_BRICK_VALID           0             /* 本板无有效电池砖 */
+	((1 << ADC_BATTERY_VOLTAGE_CHANNEL) | \
+	 (1 << ADC_BATTERY_CURRENT_CHANNEL))
 
 
 /* CAN **********************************************************************
