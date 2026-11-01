@@ -35,7 +35,8 @@
  * @file H104IMU.hpp
  * @brief H104（HiPNUC HI04M0）外置陀螺 —— 串口 IMU 驱动
  *
- * 数据来源：USART1 (=/dev/ttyS0, TX=PB6 / RX=PA10)，8N1 @115200，HI91 @100 Hz。
+ * 数据来源：UART4 (=/dev/ttyS3, TX=PA12 / RX=PA11)，8N1 @115200，HI91 @100 Hz。
+ *   （旧板 v1 曾用 USART1=/dev/ttyS0；v2 板 U7 的 4/5 脚接 UART4，启动脚本用 -p /dev/ttyS3。）
  * 解析见 h104_protocol.hpp（无 PX4 依赖，可主机单元测试）。
  *
  * 发布：**同一个 device_id** 发 sensor_gyro + sensor_accel（沿用 PX4 IMU 驱动的

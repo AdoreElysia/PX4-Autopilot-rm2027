@@ -36,7 +36,7 @@
  * @brief H104（HiPNUC HI04M0）外置陀螺串口 IMU 驱动的模块入口
  *
  * 用法：
- *   h104_imu start [-p /dev/ttyS0] [-r 0]     启动
+ *   h104_imu start [-p /dev/ttyS3] [-r 0]     启动（v2 板 UART4=/dev/ttyS3）
  *   h104_imu stop                             停止
  *   h104_imu status                           打印状态 + perf 计数
  *
@@ -89,7 +89,7 @@ against a real capture: see test_h104_protocol.cpp.
 
 	PRINT_MODULE_USAGE_NAME("h104_imu", "driver");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("start", "启动");
-	PRINT_MODULE_USAGE_PARAM_STRING('p', "/dev/ttyS0", "<file:dev>", "串口设备（本板 USART1=/dev/ttyS0）", true);
+	PRINT_MODULE_USAGE_PARAM_STRING('p', "/dev/ttyS0", "<file:dev>", "串口设备（默认 /dev/ttyS0；本板 v2 UART4=/dev/ttyS3）", true);
 	PRINT_MODULE_USAGE_PARAM_INT('r', 0, 0, 40, "安装方向旋转（PX4 Rotation，默认 0）", true);
 	PRINT_MODULE_USAGE_COMMAND_DESCR("stop", "停止");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("status", "状态 + perf 计数");

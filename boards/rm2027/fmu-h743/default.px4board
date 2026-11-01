@@ -22,7 +22,7 @@ CONFIG_DRIVERS_IMU_INVENSENSE_ICM42670P=y   # 0x75/0x67
 CONFIG_DRIVERS_IMU_INVENSENSE_ICM45686=y    # 0x72/0xE9（ID 寄存器都不同）
 CONFIG_DRIVERS_IMU_HXY_HXY42688P=y          # 华轩阳 HXY「ICM-42688P」：WHO_AM_I(0x01)=0x6A（手册 §5.1）
 CONFIG_DRIVERS_IMU_ST_LSM6DSV=y             # 0x0F/0x70（含 LSM6DSV16X）
-CONFIG_DRIVERS_IMU_HIPNUC_H104=y            # 外置陀螺 H104 (HiPNUC HI04M0) on USART1 = /dev/ttyS0
+CONFIG_DRIVERS_IMU_HIPNUC_H104=y            # 外置陀螺 H104 (HiPNUC HI04M0) on UART4 = /dev/ttyS3（v2 板）
 # 被"6 个槽位"挤掉、想换的话把上面任意一行换成下面一行即可（同时改 src/spi.cpp）：
 #   CONFIG_DRIVERS_IMU_BOSCH_BMI270=y           # 0x00/0x24（Bosch，首读需 dummy）—— 本板实物不是它
 #   CONFIG_DRIVERS_IMU_INVENSENSE_MPU6000=y     # 0x75/0x68，但封装是 QFN24 4×4 ≠ 本板 14 脚 LGA

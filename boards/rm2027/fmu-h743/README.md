@@ -29,7 +29,7 @@
 | USB | 有 | **无** | ⇒ bootloader 只走串口；无 USB console |
 | microSD | 有 | **无** | ⇒ 参数只能存片内 flash（见 §3.4） |
 | 板载 IMU | ICM-42688P | ★ **华轩阳 HXY「ICM-42688P」** | **是兼容件**：`WHO_AM_I(0x01)=0x6A`，与 Bosch ICM-42688P **不是同一颗** |
-| 外置 IMU | — | **H104（HiPNUC HI04M0）** on USART1 | 自研驱动 |
+| 外置 IMU | — | **H104（HiPNUC HI04M0）** on UART4 | 自研驱动 |
 | 磁罗盘 | — | **iSentek IST8310** on I2C4，7bit `0x0C` | 手册 §6.1.1 地址表 |
 | 气压计 | DPS310 | **Goertek SPA06** on I2C2，7bit `0x77` | 驱动缺省 `0x76` ⇒ 必须显式 `-a` |
 | 遥控 | — | **DBUS** on UART5 | |
@@ -71,10 +71,11 @@ PLL3: M 2→5, N 48→96,  P 2→5, Q 4→10, R 2→5 ⇒ 96/48/96 MHz 不变
 
 | 外设 | 节点 | 用途 |
 |---|---|---|
-| USART1 | `/dev/ttyS0` | H104 外置陀螺 |
+| USART1 | `/dev/ttyS0` | v2 未使用（bootloader 串口） |
 | USART2 | `/dev/ttyS1` | 协处理 F103 |
 | USART3 | `/dev/ttyS2` | **TEL1 → MAVLink** |
-| UART4 / USART6 / UART7 / UART8 | ttyS3 / ttyS5 / ttyS6 / ttyS7 | 4 路 ESC 遥测（预留） |
+| UART4 | `/dev/ttyS3` | **H104 外置陀螺**（v2 板 U7 的 4/5 脚） |
+| USART6 / UART7 / UART8 | ttyS5 / ttyS6 / ttyS7 | 3 路 ESC 遥测（预留） |
 | UART5 | `/dev/ttyS4` | DBUS 遥控 |
 
 ⇒ `CONFIG_BOARD_SERIAL_TEL1="/dev/ttyS2"`（与 USART3 对齐）。
@@ -195,7 +196,7 @@ git checkout dev -- boards/rm2027/fmu-h743/extras/rm2027_fmu-h743_bootloader.bin
 |---|---|---|
 | 磁罗盘 IST8310 | `Type=0x06` / `I2C:4 (0x0C)` / \|B\|=0.552 G | 身份 + 地址 + 量级 |
 | 板载 HXY42688P | `z = −9.74`，静止陀螺 ≈ 0 | 符号 + 标度 |
-| 外置 H104 | `z = −9.85`；**99.6 Hz**；`crc bad=0` `len bad=0` | 帧率 + 通信质量 |
+| 外置 H104 | `z = −9.72`；**100.0 Hz**；`crc bad=0` `len bad=0`；3860 帧 / 38.5 s | 帧率 + 通信质量 |
 | 气压计 SPA06 | `spa06 #0 on I2C bus 2 address 0x77` | |
 | EKF2 姿态 | Roll −0.3° / Pitch 0.8° | |
 | **激光测距 VL53L0X**（2026-10-18，软件 I²C，**测完已撤销**） | `model_id=0xEE`；**19.7~20.0 Hz 连续 30+ 分钟**；`bus_errors=0` / `nacks=0`；距离读数随环境变化。量程 2 m（白墙）/ 20 Hz | 身份 + 帧率 + 通信质量（§3.6，详见交接文档） |
