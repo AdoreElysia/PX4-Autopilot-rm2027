@@ -46,10 +46,12 @@
 #include <syslog.h>
 
 #include <nuttx/config.h>
+#include <nuttx/arch.h>
 #include <nuttx/board.h>
 #include <nuttx/sdio.h>
 #include <nuttx/mmcsd.h>
 #include <arch/board/board.h>
+#include <stm32_rcc.h>
 #include "arm_internal.h"
 
 #include <drivers/drv_hrt.h>
@@ -136,6 +138,42 @@ __EXPORT void stm32_boardinitialize(void)
 
 }
 
+/************************************************************************************
+ * Name: vrefbuf_init
+ *
+ * Description:
+ *   VREF+ 没有外接 3.3V，使用 STM32H7 内部 VREFBUF 作为 ADC 参考。
+ *   VSCALE=000 -> 2.5V，对应 board_config.h 的 BOARD_ADC_POS_REF_V。
+ *
+ ************************************************************************************/
+#if defined(BOARD_ADC_USE_VREFBUF)
+#define STM32_VREFBUF_BASE   0x58003c00
+#define STM32_VREFBUF_CSR    (STM32_VREFBUF_BASE + 0x00)
+
+#define VREFBUF_CSR_ENVR     (1u << 0)
+#define VREFBUF_CSR_VRR      (1u << 3)
+
+static void vrefbuf_init(void)
+{
+	/* VREFBUF 在 APB4，先开时钟 */
+	modifyreg32(STM32_RCC_APB4ENR, 0, RCC_APB4ENR_VREFEN);
+
+	/* ENVR=1, HIZ=0, VRS=00 -> 2.5V */
+	putreg32(VREFBUF_CSR_ENVR, STM32_VREFBUF_CSR);
+
+	const hrt_abstime start = hrt_absolute_time();
+
+	while ((getreg32(STM32_VREFBUF_CSR) & VREFBUF_CSR_VRR) == 0) {
+		if (hrt_elapsed_time(&start) > 10000) {
+			syslog(LOG_ERR, "[boot] VREFBUF not ready\n");
+			break;
+		}
+
+		up_udelay(10);
+	}
+}
+#endif
+
 /****************************************************************************
  * Name: board_app_initialize
  *
@@ -158,6 +196,10 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 {
 	/* Need hrt running before using the ADC */
 	px4_platform_init();
+
+#if defined(BOARD_ADC_USE_VREFBUF)
+	vrefbuf_init();
+#endif
 
 	/* configure the DMA allocator */
 	if (board_dma_alloc_init() < 0) {

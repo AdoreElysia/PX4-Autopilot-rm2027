@@ -114,6 +114,17 @@
 	((1 << ADC_BATTERY_VOLTAGE_CHANNEL) | \
 	 (1 << ADC_BATTERY_CURRENT_CHANNEL))
 
+/*
+ * VREF+ 没有外接 3.3V，只挂了 C31，设计意图是使用 STM32H7 内部 VREFBUF。
+ * 在 board_app_initialize() 里使能 VREFBUF，输出 2.5V（VSCALE=000）。
+ * 因此 ADC 参考必须是 2.5V，不能再用默认的 3.3V。
+ *
+ * 注意：BAT1_V_DIV=11 时，最大可测电压 = 2.5V × 11 = 27.5V。
+ *       3S/6S 够用，8S 会超过量程。
+ */
+#define BOARD_ADC_USE_VREFBUF           1
+#define BOARD_ADC_POS_REF_V             2.5f
+
 
 /* CAN **********************************************************************
  * CAN1 = H104 外置陀螺（PD0/PD1）
