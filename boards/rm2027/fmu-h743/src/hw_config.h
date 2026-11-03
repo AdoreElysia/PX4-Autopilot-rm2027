@@ -117,8 +117,22 @@
 # define ARCH_SN_MAX_LENGTH 12
 #endif
 
+/* ★ 参数区为 app 让出的空间 = 1 个 128K 扇区（扇区 15 = 0x081E0000）。
+ *   必须与两处同源：
+ *     script.ld            FLASH LENGTH = 1792K
+ *     src/init.c           params_sector_map {15, 128K, 0x081E0000}
+ *   推导：APP_SIZE_MAX = BOARD_FLASH_SIZE - (BOOTLOADER_RESERVATION_SIZE + APP_RESERVATION_SIZE)
+ *                     = 2048K - (128K + 128K) = 1792K
+ *
+ *   ⚠ 为什么之前是 0（提交 eb4b205550）：
+ *   那时从 matek/h743-slim 整段拄来，而参照板没开 FLASH_BASED_PARAMS
+ *   （它有 SD 卡），0 是合法的。本板在 be9f428b17 开了片内参数存储，
+ *   但只改了 script.ld / board_config.h / init.c，漏了这里 ⇒ bootloader 编译报：
+ *     #error "APP_RESERVATION_SIZE must be greater than 0 if FLASH_BASED_PARAMS is defined"
+ *   app 不检查该宏，所以一直没暴露。
+ */
 #if !defined(APP_RESERVATION_SIZE)
-#  define APP_RESERVATION_SIZE 0
+#  define APP_RESERVATION_SIZE (128 * 1024)
 #endif
 
 #if !defined(BOARD_FIRST_FLASH_SECTOR_TO_ERASE)

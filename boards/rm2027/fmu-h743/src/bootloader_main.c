@@ -48,7 +48,11 @@
 #include "arm_internal.h"
 #include <px4_platform_common/init.h>
 
+/* sercon_main 只在 CONFIG_SYSTEM_CDCACM=y 时存在（USB CDC-ACM 控制台）。
+ * 本板无 USB，124099d6c0 已删掉该配置 ⇒ 不能再引用。 */
+#if INTERFACE_USB
 extern int sercon_main(int c, char **argv);
+#endif
 
 __EXPORT void board_on_reset(int status) {}
 
@@ -68,7 +72,10 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 
 void board_late_initialize(void)
 {
+#if INTERFACE_USB
+	/* 本板无 USB：INTERFACE_USB = 0，不调用 USB 控制台 */
 	sercon_main(0, NULL);
+#endif
 }
 
 extern void sys_tick_handler(void);
