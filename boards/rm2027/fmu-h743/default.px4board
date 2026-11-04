@@ -59,9 +59,10 @@ CONFIG_COMMON_MAGNETOMETER=y
 CONFIG_DRIVERS_MAGNETOMETER_ISENTEK_IST8310=y
 CONFIG_DRIVERS_PWM_OUT=y
 # --- 测距 ---------------------------------------------------------------
-# VL53L0X（软件 I²C，临时占用 U18/PE7/PE8）已于 2026-10-18 测试完成并撤销，
-# 驱动源码保留在 src/drivers/distance_sensor/vl53l0x_softi2c/（不再编译）。
-# 要重新启用 / 或改为硬件 I²C，见 docs/交接-VL53L0X测距-2026-10-18.md。
+# 板载激光测距 VL53L0CXV0DH/1 —— 硬件 I2C1（SCL=PB6 / SDA=PB7，板载 4.7k 上拉）
+# 2026-11-04 实测确认：断电重启后 i2cdetect -b 1 在 0x29 有 ACK，总线与器件均正常。
+# 用上游 vl53l0x 驱动（10-18 那套软 I2C 是旧板判断，已作废）。
+CONFIG_DRIVERS_DISTANCE_SENSOR_VL53L0X=y
 CONFIG_DRIVERS_RC_INPUT=y
 CONFIG_COMMON_TELEMETRY=y
 CONFIG_MODULES_ATTITUDE_ESTIMATOR_Q=y

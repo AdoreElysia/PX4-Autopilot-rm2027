@@ -134,6 +134,17 @@ __EXPORT void stm32_boardinitialize(void)
 	/* configure SPI interfaces */
 	stm32_spiinitialize();
 
+	/* 2026-11-04：释放板载 VL53L0CX 的 XSHUT（PC13）。
+	 *
+	 *   实测：PC13 上电后是 ANALOG + IDR=0，XSHUT 低电平，
+	 *   VL53 一直处于 RESET。原理图 R17 10k 上拉未起作用。
+	 *   不拉高它，I2C 地址能 ACK 但寄存器全部不响应 ⇒ i2cdetect 全空白。
+	 *
+	 *   DS11555 §4.1：XSHUT 拉高后 >= 1 ms 才能访问 I2C，这里留 10 ms。
+	 */
+	px4_arch_configgpio(GPIO_VL53_XSHUT);
+	up_mdelay(10);
+
 	/* 本板无 USB，不调用 stm32_usbinitialize() */
 
 }

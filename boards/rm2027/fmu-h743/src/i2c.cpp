@@ -74,6 +74,30 @@
  * 对应 nuttx defconfig 必须使能 CONFIG_STM32H7_I2C2 / CONFIG_STM32H7_I2C4。
  */
 constexpr px4_i2c_bus_t px4_i2c_buses[I2C_BUS_MAX_BUS_ITEMS] = {
+	/* I2C1 = 板载激光测距 VL53L0CXV0DH/1（U3，焊死，非外挂模块）
+	 *
+	 *   SCL = PB6 (U1 pad 92) = 网络 IIC1_SCL，R16 4.7k 上拉到 3.3V_H7
+	 *   SDA = PB7 (U1 pad 93) = 网络 IIC1_SDA，R3  4.7k 上拉到 3.3V_H7
+	 *   XSHUT = PC13（见 board_config.h GPIO_VL53_XSHUT，由 init.c 拉高释放复位）
+	 *   GPIO1 = PB5（R18 10k 下拉，中断脚，本驱动不用）
+	 *   供电 = 3.3V_H7（VDD/AVDD），不是 5V
+	 *
+	 *   ★ PB6 是从 USART1_TX 让出来的（见 nuttx-config/include/board.h）。
+	 *     旧板 PB6 作为 USART1_TX；本板改作 I2C1_SCL。
+	 *     USART1 只是 H104 备用串口，而 H104 实际跑在 UART4（/dev/ttyS3），
+	 *     故关掉 CONFIG_STM32H7_USART1 并让出 PB6。
+	 *     两个外设抢同一脚的后果：AF7 会覆盖 AF4，I2C1 不工作。
+	 *
+	 *   证据（三方一致）：
+	 *     work/FMU2-引脚识别-20261030/FMU_1-U1-pin-table.md:93-95
+	 *     work/FMU2-引脚识别-20261030/FMU_1-功能表.md:62-65
+	 *     work/FMU2-引脚识别-20261030/netlist-FMU_1.txt:106,109,110
+	 *
+	 *   ⚠ 2026-10-18 那次用的是「外挂六针模块 + 软 I2C 挂 U18(PE7/PE8)」，
+	 *     与板上这颗 U3 是两个完全不同的电路，不能互相证明。
+	 *     软 I2C 驱动（vl53l0x_softi2c）源码保留作参考，不再编译。
+	 */
+	initI2CBusInternal(1),
 	initI2CBusInternal(2),
 	initI2CBusInternal(4),
 };

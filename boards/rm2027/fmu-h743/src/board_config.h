@@ -147,6 +147,18 @@
 #define DIRECT_PWM_OUTPUT_CHANNELS   4
 
 
+/* 板载 VL53L0CX 的 XSHUT（PC13）—— 必须由软件主动拉高。
+ *
+ *   2026-11-04 ST-Link 实测：PC13 MODER=3(ANALOG) PUPDR=0 IDR=0
+ *   => XSHUT 低电平，VL53L0CX 一直处于 RESET 态。
+ *   症状：I2C 地址逻辑硬连线仍在，但所有寄存器读写均无响应
+ *         （i2cdetect 全空白 / 驱动读寄存器 -ECOMM）。
+ *   原理图 R17 10k 上拉实测未起作用，故软件兜底。
+ *
+ *   DS11555 §4.1：XSHUT 拉高后 >= 1 ms 才能访问 I2C；这里留 10 ms。
+ */
+#define GPIO_VL53_XSHUT (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_2MHz|GPIO_OUTPUT_SET|GPIO_PORTC|GPIO_PIN13)
+
 /* 备用 GPIO（均为本板未连接引脚，留着给上层当普通 IO 用） *******************
  * 仅列出原理图上确实悬空的脚，避免误驱动已占用引脚。
  */

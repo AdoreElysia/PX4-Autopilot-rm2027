@@ -380,7 +380,11 @@
  *   USART2 = 连 F103 伴生 MCU        TX=PD5  RX=PA3
  */
 #define GPIO_USART1_RX   GPIO_USART1_RX_2   /* PA10 */
-#define GPIO_USART1_TX   GPIO_USART1_TX_3   /* PB6  ← 本板 */
+/* 2026-11-04：PB6 现属于板载 VL53L0CX 的 I2C1_SCL（见下方 GPIO_I2C1_SCL）。
+ *   USART1_TX 原在 PB6，会把该脚配成 AF7，覆盖 I2C1 需要的 AF4。
+ *   USART1 只是 H104 备用串口，而 H104 实际跑在 UART4（/dev/ttyS3），故让出无影响。
+ */
+/* #define GPIO_USART1_TX GPIO_USART1_TX_3   PB6 -- 已让给 I2C1_SCL */
 
 #define GPIO_USART2_RX   GPIO_USART2_RX_1   /* PA3  ← 本板 */
 #define GPIO_USART2_TX   GPIO_USART2_TX_2   /* PD5  */

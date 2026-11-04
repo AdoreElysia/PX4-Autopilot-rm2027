@@ -133,5 +133,8 @@ spa06 -I -b 2 -a 0x77 start
 #   ⚠️ 放飞前必须解决：X/Y 正负方向尚未用实物转动验证（见 work/spi-runtime/H104-帧格式规格.md §8.2）
 h104_imu start -p /dev/ttyS3
 
-# 激光测距 VL53L0X（软件 I²C，临时占用 U18/PE7/PE8）已于 2026-10-18 测试完成并撤销，
-# UART7 恢复给 ESC3 串口遥测。要重新启用见 docs/交接-VL53L0X测距-2026-10-18.md。
+# 板载激光测距 VL53L0CXV0DH/1 on 硬件 I2C1
+#   SCL=PB6 / SDA=PB7（板载 R16/R3 各 4.7k 上拉），XSHUT=PC13 由 init.c 拉高
+#   -I 板载内部总线 / -b 1 I2C1 / -a 0x29 出厂地址 / -R 25 朝下
+#   ⚠ 不要用 ST-Link 反复 halt 读寄存器：会把 VL53 搞进降级态（见 10-18 文档 §11.3）
+vl53l0x start -I -b 1 -a 0x29 -R 25
