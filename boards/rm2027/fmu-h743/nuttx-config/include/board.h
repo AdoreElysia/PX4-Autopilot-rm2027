@@ -380,11 +380,26 @@
  *   USART2 = 连 F103 伴生 MCU        TX=PD5  RX=PA3
  */
 #define GPIO_USART1_RX   GPIO_USART1_RX_2   /* PA10 */
-/* 2026-11-04：PB6 现属于板载 VL53L0CX 的 I2C1_SCL（见下方 GPIO_I2C1_SCL）。
- *   USART1_TX 原在 PB6，会把该脚配成 AF7，覆盖 I2C1 需要的 AF4。
- *   USART1 只是 H104 备用串口，而 H104 实际跑在 UART4（/dev/ttyS3），故让出无影响。
+/* 2026-11-07 修正：USART1 **必须保持启用**，TX 从 PB6 改到 PB14。
+ *
+ *   原因（关键）：NuttX 的 ttyS 编号按「跳过 NULL 后连续递增」分配，
+ *   不是按外设编号。见 nuttx/arch/arm/src/stm32h7/stm32_serial.c：
+ *
+ *       minor = 0;
+ *       for (i = 0; i < STM32_NSERIAL; i++) {
+ *           if (g_uart_devs[i] == 0) continue;   // 跳过未配置的
+ *           devname[9] = 0 + minor++;           // 编号连续递增
+ *       }
+ *
+ *   2026-11-04 为了给 VL53 让出 PB6 而关掉 USART1，导致所有 ttyS 前移 1 位：
+ *      ttyS3 从 UART4（H104）变成了 UART5，open 报 ENXIO。
+ *   实测（吐血）：回到 VL53 提交之前的固件，H104 立刻恢复 100 Hz；
+ *   带着关 USART1 的改动，fd=-1、开端口失败。
+ *
+ *   ⇒ USART1 恢复启用，TX 改到 PB14（本板完全空闲，全仓搜索无冲突），
+ *     USART1 本身在本板不接任何东西，只是占编号。
  */
-/* #define GPIO_USART1_TX GPIO_USART1_TX_3   PB6 -- 已让给 I2C1_SCL */
+#define GPIO_USART1_TX   GPIO_USART1_TX_1   /* PB14（本板空闲；原 PB6 已归 I2C1_SCL） */
 
 #define GPIO_USART2_RX   GPIO_USART2_RX_1   /* PA3  ← 本板 */
 #define GPIO_USART2_TX   GPIO_USART2_TX_2   /* PD5  */
