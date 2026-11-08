@@ -241,20 +241,23 @@ private:
 		s.system_time_ms = read_u32(p + 8);
 		s.temperature_c = static_cast<float>(static_cast<int8_t>(p[3]));
 
-		/* 载体系 RFU (X右/Y前/Z上) → PX4 机体系 FRD (X前/Y右/Z下)：[y, x, −z] */
-		const float ax = read_f32(p + 12);      /* 右, G */
-		const float ay = read_f32(p + 16);      /* 前, G */
-		const float az = read_f32(p + 20);      /* 上, G */
-		s.acc_m_s2[0] = ay * kStandardGravity;
-		s.acc_m_s2[1] = ax * kStandardGravity;
-		s.acc_m_s2[2] = -az * kStandardGravity;
+		/* ★ 2026-11-08：模块层只做单位换算，**不做任何轴向变换**。
+		 *
+		 *   HI04 手册 §13.1：载体系为 RFU（X右 / Y前 / Z上）。
+		 *    这里原样把芯片输出传下去（只把 G→m/s²、deg/s→rad/s），
+		 *    方向适配全部交给板级层的 -R 参数。
+		 *
+		 *   为什么：这份驱动以后会被其他板子复用。若在这里写死一套轴交换，
+		 *   新板子安装方向不同时，就得改驱动，而不是改板级配置。
+		 *
+		 *   原来写的 [y, x, −z] 是把 RFU→FRD 硬编码在这，现已移除。 */
+		s.acc_m_s2[0] = read_f32(p + 12) * kStandardGravity;   /* 原始 X (右)  */
+		s.acc_m_s2[1] = read_f32(p + 16) * kStandardGravity;   /* 原始 Y (前)  */
+		s.acc_m_s2[2] = read_f32(p + 20) * kStandardGravity;   /* 原始 Z (上)  */
 
-		const float gx = read_f32(p + 24);      /* deg/s */
-		const float gy = read_f32(p + 28);
-		const float gz = read_f32(p + 32);
-		s.gyro_rad_s[0] = gy * kDegToRad;
-		s.gyro_rad_s[1] = gx * kDegToRad;
-		s.gyro_rad_s[2] = -gz * kDegToRad;
+		s.gyro_rad_s[0] = read_f32(p + 24) * kDegToRad;        /* 原始 X (右)  */
+		s.gyro_rad_s[1] = read_f32(p + 28) * kDegToRad;        /* 原始 Y (前)  */
+		s.gyro_rad_s[2] = read_f32(p + 32) * kDegToRad;        /* 原始 Z (上)  */
 
 		_cb(_ctx, s);
 	}

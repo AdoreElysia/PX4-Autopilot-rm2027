@@ -90,7 +90,7 @@ against a real capture: see test_h104_protocol.cpp.
 	PRINT_MODULE_USAGE_NAME("h104_imu", "driver");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("start", "启动");
 	PRINT_MODULE_USAGE_PARAM_STRING('p', "/dev/ttyS0", "<file:dev>", "串口设备（默认 /dev/ttyS0；本板 v2 UART4=/dev/ttyS3）", true);
-	PRINT_MODULE_USAGE_PARAM_INT('r', 0, 0, 40, "安装方向旋转（PX4 Rotation，默认 0）", true);
+	PRINT_MODULE_USAGE_PARAM_INT('R', 0, 0, 40, "安装方向旋转（PX4 Rotation，默认 0）", true);
 	PRINT_MODULE_USAGE_COMMAND_DESCR("stop", "停止");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("status", "状态 + perf 计数");
 }
@@ -108,13 +108,13 @@ int h104_imu_main(int argc, char *argv[])
 	int ch;
 	const char *myoptarg = nullptr;
 
-	while ((ch = px4_getopt(argc, argv, "p:r:", &myoptind, &myoptarg)) != EOF) {
+	while ((ch = px4_getopt(argc, argv, "p:R:", &myoptind, &myoptarg)) != EOF) {
 		switch (ch) {
 		case 'p':
 			port = myoptarg;
 			break;
 
-		case 'r':
+		case 'R':
 			rotation = static_cast<enum Rotation>(atoi(myoptarg));
 			break;
 
