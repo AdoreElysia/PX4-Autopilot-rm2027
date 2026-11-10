@@ -52,7 +52,7 @@ static constexpr size_t   kReadChunk     = 256;
 
 H104IMU::H104IMU(const char *port, uint32_t device_id, enum Rotation rotation) :
 	ScheduledWorkItem(MODULE_NAME, px4::wq_configurations::INS0),
-	_port(port),
+	_port{},
 	_device_id(device_id),
 	_rotation(rotation),
 	_px4_accel(device_id, rotation, true /* external：外挂模块 */),
@@ -66,6 +66,12 @@ H104IMU::H104IMU(const char *port, uint32_t device_id, enum Rotation rotation) :
 	_perf_overflow(perf_alloc(PC_COUNT, "h104_imu: rx overflow")),
 	_start_time(hrt_absolute_time())
 {
+	// 拷贝端口名：不能存 argv 的指针（nsh 返回后失效，见 hpp 里的说明）
+	if (port != nullptr) {
+		strncpy(_port, port, sizeof(_port) - 1);
+		_port[sizeof(_port) - 1] = '\0';
+	}
+
 	_parser.setCallback(&H104IMU::SampleTrampoline, this);
 }
 

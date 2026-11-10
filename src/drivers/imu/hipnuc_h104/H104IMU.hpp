@@ -90,7 +90,12 @@ private:
 	void Publish(const hipnuc_h104::Sample &sample);
 	void UpdatePerfCounters();
 
-	const char  *_port;
+	// ★ 必须是数组而不是指针：port 来自 main() 的 argv，
+	//   nsh 命令返回后那块内存会被回收。存指针 = 悬空指针 = 未定义行为。
+	//   2026-11-10 实测：加了新模块改变堆布局后，_port 内容变成乱码，
+	//   open() 直接失败、status 打印乱码。改成拷贝才是正确做法。
+	static constexpr unsigned kPortMaxLen = 32;
+	char _port[kPortMaxLen]{};
 	const uint32_t _device_id;
 	const enum Rotation _rotation;
 

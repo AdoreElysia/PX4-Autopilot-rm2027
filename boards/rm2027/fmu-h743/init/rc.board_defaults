@@ -11,3 +11,71 @@
 #       BAT1_N_CELLS / BAT1_CAPACITY 由 QGC 按实际电池设置，这里不写死。
 param set-default BAT1_V_DIV 11
 param set-default BAT1_A_PER_V 0
+
+# ── MAVLink 带宽与 IMU 采样率（2026-11-10）───────────────────────────
+#
+# 这三个是 PX4 参数，不是 NuttX defconfig —— 改 defconfig 无效，
+# 因为 PX4 启动 mavlink 时用 "-b p:SER_TEL1_BAUD" 显式覆盖。
+#
+# 实测（2026-11-10）：
+#   CH340 (VID_1A86/PID_7523) 在 921600 下收不到任何有效 MAVLink 帧。
+#   板子确实按 921600 发送（实测 3298 字节/1.5s），但 CH340 解出来全是乱码；
+#   57600 下 0xFD 帧头正常出现 29 次。⇒ 波特率上限被 CH340 卡死在 57600。
+#
+# 所以 BAUD 保持 57600，但下面两个必须改：
+#
+#   MAV_0_RATE 默认 1200 B/s，而 57600 8N1 的理论上限是 5760 B/s。
+#   这个软件限速会让 HIGHRES_IMU（约 70 B/帧）最多只到 ~17 Hz，
+#   实测请求 200Hz 只得到 13.2Hz。设 0 = 自动取波特率的一半。
+#
+#   IMU_GYRO_RATEMAX 默认 400Hz。5 寸以下小机建议 1000Hz，
+#   否则 FFT 看不到高频振动。
+param set-default SER_TEL1_BAUD 57600
+param set-default MAV_0_RATE 0
+param set-default IMU_GYRO_RATEMAX 1000
+
+# ── 板载陀螺 FFT（2026-11-10）────────────────────────────────────
+#
+#   本板无 SD 卡、无 USB，拿不到 ulog，无法用 Flight Review 看功率谱密度。
+#   串口传原始陀螺数据也不可行：原始速率 1997.95 Hz × 74 B ≈ 148 KB/s，
+#   921600 实测只到 12 KB/s，且 mavlink 主循环把单流频率限在约 154 Hz
+#   （Nyquist 77 Hz，看不到 167 Hz 的电机基频）。
+#
+#   ⇒ 让板子本地算 FFT（CMSIS-DSP），只把峰值结论发出去。
+#     采样率约 1998 Hz，Nyquist 999 Hz，分辨率 3.9 Hz，足够看基频和三倍谐波。
+#
+#   FFT_MAX 设 500：三叶桨的三次谐波在此附近；
+#   FFT_LEN 512：与实测采样率 1998 Hz 配合得到 3.9 Hz 分辨率；
+#   FFT_SNR 设 6：默认 10 太严，小机低油门时常常一个峰都报不出来。
+param set-default IMU_GYRO_FFT_EN 1
+param set-default IMU_GYRO_FFT_MIN 30
+param set-default IMU_GYRO_FFT_MAX 700
+param set-default IMU_GYRO_FFT_LEN 512
+param set IMU_GYRO_FFT_SNR 6
+
+# ── 动态陷波（2026-11-10 实测标定）────────────────────────────────
+#
+# 实测数据（rc_log_20261110_144134.csv，336 帧有效 FFT）：
+#   · 悬停（50% 推力）基频 419 Hz，三轴共模（差 < 5 Hz）
+#   · 55% 推力 442 Hz，57% 推力 448 Hz
+#   · 频率比与 sqrt(推力比) 偏差 < 1.6%，确认是基频 1x 而非谐波
+#   · 外推 100% 推力约 593 Hz
+#
+# 所以转速跨度 419~593 Hz（174 Hz），静态陷波（带宽最多 30Hz）覆盖不了，
+# 必须用 FFT 驱动的动态陷波。
+#
+# DNF_EN = 2 而不是 1：这是 bitmask，
+#   bit0 = ESC RPM（本板没有双向 DShot，取不到转速）
+#   bit1 = FFT     ← 只用这个
+#
+# DNF_MIN = 350：实测最低基频 419 × 0.85 ≈ 356，留一点余量。
+# DNF_BW  = 20 ：四电机转速有差异，带宽太小会漏峰。
+# DNF_HMC = 3  ：三叶桨，跟踪 1x/2x/3x。
+#
+# 静态陷波 NF0 保持 0（交给动态陷波处理）。
+param set-default IMU_GYRO_DNF_EN 2
+param set-default IMU_GYRO_DNF_MIN 350
+param set-default IMU_GYRO_DNF_BW 20
+param set-default IMU_GYRO_DNF_HMC 3
+param set-default IMU_GYRO_NF0_FRQ 0
+param set-default IMU_GYRO_NF0_BW 20

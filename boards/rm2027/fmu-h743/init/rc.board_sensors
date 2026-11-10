@@ -156,3 +156,20 @@ h104_imu start -p /dev/ttyS3 -R 2
 #   -I 板载内部总线 / -b 1 I2C1 / -a 0x29 出厂地址 / -R 25 朝下
 #   ⚠ 不要用 ST-Link 反复 halt 读寄存器：会把 VL53 搞进降级态（见 10-18 文档 §11.3）
 vl53l0x start -I -b 1 -a 0x29 -R 25
+
+# ── 板载 FFT 结果桥接（2026-11-10）─────────────────────────────────
+#
+#   gyro_fft 在板子本地算 FFT（采样率约 1998 Hz，Nyquist 999 Hz），
+#   把 9 个峰值频率 + SNR 发布到 sensor_gyro_fft。
+#   但这个 topic 没有对应的 MAVLink 流，数据出不来。
+#
+#   gyrofft_bridge 订阅 sensor_gyro_fft + actuator_motors + vehicle_attitude，
+#   打包成 debug_array（id=0, name="GYROFFT"）以 10 Hz 发布，
+#   再由 MAVLink 的 DEBUG_FLOAT_ARRAY 流出。带宽约 2.5 KB/s。
+#
+#   为什么必须放这里而不是靠手动 start：
+#   板子重启后模块就没了，而本板没有 SD/USB，
+#   唯一的数据出口就是这条链 —— 忘了启一次就白测一整天（踩过）。
+#
+#   ⚠ 依赖 IMU_GYRO_FFT_EN=1（在 rc.board_defaults 里设）。
+gyrofft_bridge start

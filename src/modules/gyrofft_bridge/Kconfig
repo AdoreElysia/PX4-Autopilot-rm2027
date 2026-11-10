@@ -1,0 +1,7 @@
+menuconfig MODULES_GYROFFT_BRIDGE
+	bool "gyrofft_bridge"
+	default n
+	---help---
+		Bridge the onboard gyro FFT peaks (sensor_gyro_fft) plus the
+		current motor thrust into debug_array, so they can be streamed
+		over MAVLink DEBUG_FLOAT_ARRAY.
