@@ -171,6 +171,24 @@
  */
 
 
+/* QMC5883L 软件 I²C 引脚（2026-11-13 曾启用，2026-11-14 停用）*********
+ *
+ * 背景：PU-122Q GPS 模块内置 QMC5883L 罗盘（0x0D），本板 I²C4 无法外接
+ *       （全部焊点只有 IST8310 的 LGA 焊盘 / 两颗 0402 电阻 / MCU 的 LQFP 脚），
+ *       所以当年借空闲串口座 U19 的 PE0/PE1 做 GPIO bit-bang。
+ *
+ * ★ 2026-11-14 停用原因：用户决定暂时不使用该模块（GPS 也一并停用），
+ *   PE0/PE1 已还给 UART8（见 nuttx-config/nsh/defconfig）。
+ *   驱动源码保留：src/drivers/magnetometer/qmc5883l_softi2c/、src/lib/softi2c/
+ *
+ * 重新启用时：取消下面两行注释，并把 defconfig 的 CONFIG_STM32H7_UART8
+ *             再次关闭（否则引脚被 UART8 抢占）。
+ *   接线：模块 C (SCL) → U19.2 (PE0)，模块 D (SDA) → U19.3 (PE1)
+ */
+// #define BOARD_QMC5883L_SOFTI2C_SCL_PINSET (GPIO_OUTPUT|GPIO_OPENDRAIN|GPIO_SPEED_2MHz|GPIO_OUTPUT_SET|GPIO_PORTE|GPIO_PIN0)
+// #define BOARD_QMC5883L_SOFTI2C_SDA_PINSET (GPIO_OUTPUT|GPIO_OPENDRAIN|GPIO_SPEED_2MHz|GPIO_OUTPUT_SET|GPIO_PORTE|GPIO_PIN1)
+
+
 /* 蜂鸣器：本板没有 ********************************************************* */
 // #define GPIO_TONE_ALARM_IDLE ...
 // #define GPIO_TONE_ALARM_GPIO ...

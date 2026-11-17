@@ -54,7 +54,7 @@
 
 #pragma once
 
-#include "SoftI2C.hpp"
+#include <lib/softi2c/SoftI2C.hpp>
 
 #include <drivers/drv_hrt.h>
 #include <drivers/drv_sensor.h>
@@ -79,25 +79,25 @@
  *     10 last_dist_mm 11 last_range_status 12 lines_ok 13 scl_high 14 sda_high 15 ack_ok
  */
 extern "C" {
-struct Vl53l0xSoftI2cStatus {
-	uint32_t magic;
-	uint32_t version;
-	uint32_t running;
-	uint32_t uptime_ms;
-	uint32_t init_ok;
-	uint32_t model_id;
-	uint32_t bus_errors;
-	uint32_t bus_nacks;
-	uint32_t bus_bytes;
-	uint32_t published;
-	uint32_t last_dist_mm;
-	uint32_t last_range_status;
-	uint32_t lines_ok;
-	uint32_t scl_high;
-	uint32_t sda_high;
-	uint32_t ack_ok;
-};
-extern volatile Vl53l0xSoftI2cStatus rm2027_vl53l0x_status;
+	struct Vl53l0xSoftI2cStatus {
+		uint32_t magic;
+		uint32_t version;
+		uint32_t running;
+		uint32_t uptime_ms;
+		uint32_t init_ok;
+		uint32_t model_id;
+		uint32_t bus_errors;
+		uint32_t bus_nacks;
+		uint32_t bus_bytes;
+		uint32_t published;
+		uint32_t last_dist_mm;
+		uint32_t last_range_status;
+		uint32_t lines_ok;
+		uint32_t scl_high;
+		uint32_t sda_high;
+		uint32_t ack_ok;
+	};
+	extern volatile Vl53l0xSoftI2cStatus rm2027_vl53l0x_status;
 }
 
 class VL53L0XSoftI2C : public px4::ScheduledWorkItem

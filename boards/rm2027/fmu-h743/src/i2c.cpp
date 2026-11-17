@@ -99,5 +99,18 @@ constexpr px4_i2c_bus_t px4_i2c_buses[I2C_BUS_MAX_BUS_ITEMS] = {
 	 */
 	initI2CBusInternal(1),
 	initI2CBusInternal(2),
+	/* I2C4 = 板载磁罗盘 IST8310 专用。
+	 *
+	 * ★ 2026-11-13 结论修正：这条总线**无法外接任何东西**。
+	 *   网表里 IIC4_SCL / IIC4_SDA 的全部焊点只有三个：
+	 *     IIC4_SCL → R20.1(0402 电阻) · U1.59(MCU LQFP 脚) · U2.1(IST8310 的 LGA-16 焊盘)
+	 *     IIC4_SDA → R2.1 (0402 电阻) · U1.60(MCU LQFP 脚) · U2.16(IST8310 的 LGA-16 焊盘)
+	 *   也就是说 I²C4 只连到「芯片本体 + 0402 电阻 + MCU 引脚」，
+	 *   **没有任何测试点、没有引出到任何一个接插件**（原理图 fmu_2026-09-24.pdf 的 MAG 区块
+	 *   + UART Interface 区块可逐段核对：5 个 GH1.25-4P 座只有 5V/GND/TX/RX）。
+	 *   ⇒ 想在插座上接第二个 I²C 器件，物理上做不到。
+	 *
+	 *   所以这条总线保持 Internal，不要改成 Shared——改了也没有任何插座能接上来。
+	 */
 	initI2CBusInternal(4),
 };

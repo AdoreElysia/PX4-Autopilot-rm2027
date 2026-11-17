@@ -61,7 +61,7 @@
  *   ⇒ 硬件改版把真正的 I²C 引出后：删掉本驱动、改回上游 vl53l0x 驱动即可。
  */
 
-#include "SoftI2C.hpp"
+#include <lib/softi2c/SoftI2C.hpp>
 #include "VL53L0XSoftI2C.hpp"
 
 #include <stdlib.h>

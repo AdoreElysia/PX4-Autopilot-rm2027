@@ -82,7 +82,24 @@ board_adc start
 #   ⚠️ 待办：这一条要由"重跑六面标定能过"来最终验收；若仍有面失败，见 work/spi-runtime/ 的排查记录。
 #   ⚠️ 另有未决项：姿势2那次 hxy 的 |a| 读到 35.9 m/s²（≈3.6g），H104 同刻 9.84 ——
 #      可能是手在动（两条报文差 37 ms），也可能是该通道增益异常，**尚未定论**。
-hxy42688p -s -b 1 -R 6 start
+#
+# ★★★ 2026-11-17 【已停用】—— 只用 BMI088 ★★★
+#
+#   用户实测结论：这颗 HXY「ICM-42688P」加计不可用（六面标定反复失败、
+#   静止时读数异常），且板上已有可靠的 BMI088。下一版飞控硬件将移除该芯片。
+#   因此这里不再启动它（原命令留作记录）：
+#
+#       hxy42688p -s -b 1 -R 6 start
+#
+#   停用后的实际状态（2026-11-17 实测）：
+#     · hxy42688p status        → Not running
+#     · vehicle_imu instance 0  → 200 Hz，device_id 均为 SPI:2（BMI088）
+#     · sensor_selection        → 全部指向 SPI:2（BMI088）
+#   也就是说 EKF 的高度/姿态**完全由 BMI088 + VL53 激光**驱动，
+#   不再受这颗坏芯片干扰。
+#
+#   ⚠️ 想恢复只需取消下面那行的注释（驱动源码仍在 src/drivers/imu/hxy/）。
+# hxy42688p -s -b 1 -R 6 start
 
 # 板载 IMU-B: Bosch BMI088 on SPI2（2026-10-30 新增）
 #   颜色分开写：BMI088 是两颗 die 共用一组 SPI 线，
@@ -102,20 +119,60 @@ hxy42688p -s -b 1 -R 6 start
 #     模块层（驱动）  只做单位换算，不做任何轴向变换
 #     板级层（本文件）  所有安装方向补偿都在 -R 里
 #
-#   当前实测可用组合（飞机正放时 accel.z < 0，两路一致性 0.11）：
-#     BMI088  -R 14 = ROTATION_ROLL_180_YAW_270   (x=-y, y=-x, z=-z)
+#   当前组合（2026-11-14 改用 -R 1，只绕 Z 顺时针 45°）：
+#     BMI088  -R  1 = ROTATION_YAW_45
+#                     roll=0°, pitch=0°, yaw=45°（俯视顺时针 45°）
+#                     (x,y,z) -> (0.707x-0.707y, 0.707x+0.707y, +z)   z 不翻转
 #     H104    -R  2 = ROTATION_YAW_90             (x=-y, y=+x, z=+z)
 #
-#   为什么不能用 -R 10 / -R 8：
-#     -R 10 (ROLL_180_YAW_90) 和 -R 8 (ROLL_180) 都含 z=-z，
-#     会把飞机正放时本应为负的 accel.z 翻成正，
-#     导致校准报 "invalid Z-axis"。
+#   ★ 2026-11-14 为什么从 -R 7 改成 -R 1：
+#     要求「只绕 Z 轴顺时针 45°（俯视），别的都不转」。
+#     PX4 用 FRD（z 轴朝下），绕 +z 右手定则转，从上往下看是【顺时针】。
+#     所以俯视顺时针 45° = yaw +45 = -R 1；
+#         俯视逆时针 45° = yaw 315 = -R 7（上一版）。
+#     两者只差 yaw 符号，e_x 映射互为镜像。
+#
+#   ★ z 方向：
+#     -R 1 的 z 是 +z（不翻转），正放时 accel.z 应读到 ≈ -9.8，
+#     满足 accelerometer_calibration.cpp:269 对 RIGHTSIDE_UP
+#     要求 accel Z < 0 —— 六面校准能过。
+#
+#
+#
+#     改成只保留绕 Z 逆时针 45°、去掉 X 的 180°，z 就回到 +z 不翻转。
+#
+#     -R 15 = Rz(315)·Rx(180):  e_x=(0.707,-0.707,0)  e_y=(-0.707,-0.707,0)  e_z=(0,0,-1)
+#     -R  7 = Rz(315)        :  e_x=(0.707,-0.707,0)  e_y=( 0.707, 0.707,0)  e_z=(0,0,+1)
+#     两者【x 轴映射完全相同】，差别只在 y 反号、z 反号。
+#     换句话说：去掉 roll=180 等价于「y 和 z 同时取反」（det 仍为 +1）。
+#
+#   ★ 想「只把 z 取负、x/y 不变」是做不到的：
+#     [[0.707,-0.707,0],[-0.707,-0.707,0],[0,0,+1]] 行列式 = -1，
+#     是镜像不是旋转。Rotation 枚举 40 多项全是 det=+1，没有这一项。
+#     刚体旋转只能翻 0 个或 2 个轴，不能只翻 1 个或 3 个。
+#
+#   ★ 45° 走的是矩阵分支，不是手写换轴：
+#     rotate_3()（rotation.h:171-240）只覆盖 0/90/180/270 的整数组合，
+#     45° 没有被覆盖 → rotate_3f() 回落到 get_rot_matrix()（rotation.cpp:75-84）。
+#     实际效果等价，只是多一次浮点矩阵乘。
+#
+#   ★ z 方向（重要）：
+#     -R 7 的 z 是 +z（不翻转），正放时 accel.z 应读到 ≈ -9.8。
+#     这正是 accelerometer_calibration.cpp:269 要求的
+#     RIGHTSIDE_UP 时 accel Z < 0，六面校准能过。
+#
+#   历史（保留备查，避免再绕回同一个坑）：
+#     11-08  用 -R 14，飞机正放，两路 IMU 一致性 0.11
+#     11-10  整机倒装，改 -R 2（倒装 = 正装姿态再叠加 ROLL_180，
+#            矩阵相乘后 R14 x R180 = YAW_90，即 -R 2）
+#     11-12  想在正装下复用，试 -R 6（roll/pitch 反的推解）—— 不成立
+#     11-13  -R 14 → -R 9（顺时针 45°）→ -R 15（逆时针 45°+roll180）→ -R 7（当前）
 #
 #   校验依据：PX4 accelerometer_calibration.cpp:269 要求
 #   RIGHTSIDE_UP（正放）时 accel Z 必须 < 0。
 #   SENS_BOARD_ROT 必须保持 0（它会在校准 Correct() 里再乘一次）。
-bmi088 -A -s -b 2 -R 14 start
-bmi088 -G -s -b 2 -R 14 start
+bmi088 -A -s -b 2 -R 1 start
+bmi088 -G -s -b 2 -R 1 start
 
 # 磁罗盘: iSentek IST8310 on I2C4 (PD12/PD13), 7bit 地址 0x0C
 # ★ 实测确认（2026-09-30）：打成 af9838 起得来 —— 但那是**错驱动认错了芯片**，
@@ -137,6 +194,22 @@ bmi088 -G -s -b 2 -R 14 start
 #    半径窗口 (0.2, 0.7) ⇒ 标定能跑通，真正的刻度由标定自己估。若 fitness 很差再回头查。
 ist8310 -I -b 4 -a 0x0C -R 0 start
 
+# ── 外置罗盘 QMC5883L（PU-122Q）与板载 I2C4 的说明（2026-11-14 停用）────
+#
+# 模块罗盘 QMC5883L（0x0D）当前**不启用**，原因见下方「外置 GPS / 模块罗盘」段。
+# 驱动源码保留：src/drivers/magnetometer/qmc5883l_softi2c/
+# 重新启用步骤也写在那一段里。
+#
+# ── 关于板载 I2C4 为什么不能再挂东西（保留备查）────────────────────
+#
+#   网表里 IIC4_SCL / IIC4_SDA 的全部焊点只有三个：
+#     IIC4_SCL → R20.1(0402) · U1.59(MCU LQFP) · U2.1(IST8310 LGA-16)
+#     IIC4_SDA → R2.1 (0402) · U1.60(MCU LQFP) · U2.16(IST8310 LGA-16)
+#   依据：work/FMU2-引脚识别-20261030/netlist-FMU_1.txt:113-114
+#         + 原理图 fmu_2026-09-24.pdf 的 MAG 区块
+#   ⇒ 这条总线只服务于焊死的 IST8310，**物理上无法外接**。
+#     所以 i2c.cpp 里它保持 initI2CBusInternal(4)，不要改成 Shared。
+
 # 气压计: SPA06-003 on I2C2 (PB10/PB11)
 # ★ 实测确认（2026-09-30）：器件在 0x77，而驱动默认 0x76 ⇒ **必须显式 -a 0x77**，
 #   否则 probe 会去问 0x76、拿 NACK，报 "no instance started"。
@@ -149,13 +222,74 @@ spa06 -I -b 2 -a 0x77 start
 #   解析器已把模块的 RFU 载体系换算成 PX4 的 FRD ⇒ -r 保持 0；
 #   只有模块在机架上的贴装方向与"右前上"不符时才需要调 -r。
 #   ⚠️ 放飞前必须解决：X/Y 正负方向尚未用实物转动验证（见 work/spi-runtime/H104-帧格式规格.md §8.2）
-h104_imu start -p /dev/ttyS3 -R 2
+#
+# ★ 2026-11-14 起【停用】h104_imu：
+#   原因：六面校准报 "accel 1 invalid Z-axis, check rotation"。
+#   accelerometer_calibration.cpp:447 用
+#       uORB::SubscriptionMultiArray<sensor_accel_s, MAX_ACCEL_SENS>
+#   遍历【所有在发布的 sensor_accel 实例】，完全不看 CAL_ACCx_PRIO ——
+#   所以把 PRIO 设成 0 只能让运行时不再选它，校准照样把它算进去
+#   （日志 "calibration started: 2 accel" 就是数到了两个实例）。
+#
+#   实测两颗加计在正放时 z 符号相反：
+#       BMI088 (-R 1)  z = -9.65   ✓ 符合 RIGHTSIDE_UP 要求 z < 0
+#       H104   (-R 2)  z = +9.68   ✗ 直接触发 invalid Z-axis
+#   这两颗芯片在板上的实际安装方向相差一个点反射，
+#   不可能靠 -R 调平（刚体旋转 det=+1，无法只翻 z 一个轴）。
+#
+#   停用后：EKF 只用 BMI088 一路（陀螺 PRIO 90 / 加计 PRIO 90），
+#   数据源自洽，六面校准也能通过。
+#
+#   要恢复：取消下一行注释。恢复前必须先解决 H104 的安装方向，
+#   否则校准和 EKF 都会再次出问题。
+# h104_imu start -p /dev/ttyS3 -R 2
 
 # 板载激光测距 VL53L0CXV0DH/1 on 硬件 I2C1
 #   SCL=PB6 / SDA=PB7（板载 R16/R3 各 4.7k 上拉），XSHUT=PC13 由 init.c 拉高
 #   -I 板载内部总线 / -b 1 I2C1 / -a 0x29 出厂地址 / -R 25 朝下
 #   ⚠ 不要用 ST-Link 反复 halt 读寄存器：会把 VL53 搞进降级态（见 10-18 文档 §11.3）
 vl53l0x start -I -b 1 -a 0x29 -R 25
+
+# ── 外置 GPS / 模块罗盘：2026-11-14 暂时停用 ──────────────────────────
+#
+# 实物 = 普锐微（UPRII）PU-122Q，主芯片 u-blox M10050（M10 平台），内置 QMC5883L 罗盘。
+# 模块焊盘 6 个，丝印从左到右：G V T R C D
+#
+# ★ 调试结论（2026-11-13/14，证据均已核实）：
+#   · 链路正常：UART7 时钟/引脚 AF/收发使能/波特率(115163) 全部正确，
+#     PE7 空闲为高电平 ⇒ 接线、共地、电平都没问题。
+#   · 模块正常：从飞控内存抓到的原始数据是标准 NMEA ——
+#       $GNRMC/$GNGGA/$GNGSA/$GNGLL/$GNVTG
+#       $GNTXT,01,01,02,HW UBX 10 000A0000  ← 硬件确为 u-blox M10
+#   · 驱动正常：`gps status` 的 rate reading = 72 B/s（非 0，说明在收数据）。
+#   · **室内 0 颗星、fix 无效**（GGA 字段 `0,00` / RMC 的 `V`）—— 这是正常的，
+#     PX4 驱动要等到有效定位帧才报 OK，所以室内永远显示 NOT OK。
+#   ⇒ 结论：**不是故障，是没有卫星信号**。要到室外开阔处才能验证。
+#
+# ★ 因此本次全部停用：
+#   - default.px4board 顶部 CONFIG_BOARD_SERIAL_GPS1 已注释
+#   - CONFIG_DRIVERS_GPS / CONFIG_GPS_UBX 已注释（gps 驱动不再编入固件）
+#   - CONFIG_DRIVERS_MAGNETOMETER_QMC5883L_SOFTI2C 已注释
+#   - PE0/PE1 已还给 UART8（defconfig 恢复 CONFIG_STM32H7_UART8=y）
+#   - 本文件不再有任何 gps / qmc5883l 启动行
+#
+# ★ 恢复时要做的（顺序别搞反）：
+#   1. 打开 default.px4board 的 CONFIG_BOARD_SERIAL_GPS1 / CONFIG_DRIVERS_GPS /
+#      CONFIG_GPS_UBX（GPS 部分）
+#   2. 若同时要模块罗盘：关掉 defconfig 的 CONFIG_STM32H7_UART8，
+#      打开 board_config.h 里两行 BOARD_QMC5883L_SOFTI2C_*_PINSET，
+#      再加一行 `qmc5883l_softi2c start -X`
+#   3. GPS 不需要在这里写 `gps start` —— rc.serial 会根据 GPS_1_CONFIG 自动启动，
+#      手写会起第二个实例抢同一个串口。
+#
+# ★ 硬件接线（恢复时参考）：
+#     G → U18.4 (GND)      V → U18.1 (5V)
+#     T → U18.2 (PE7)      R → U18.3 (PE8)     ← T/R 交叉
+#     C → U19.2 (PE0)      D → U19.3 (PE1)     ← 仅模块罗盘需要
+#
+# ⚠️ 教训：调试 GPS 时用 `gps status` 看 rate reading 就够了。
+#    反复用 ST-Link halt 读内存会把飞控卡死（本次发生过多次，需 reset run 才恢复）。
+
 
 # ── 板载 FFT 结果桥接（2026-11-10）─────────────────────────────────
 #

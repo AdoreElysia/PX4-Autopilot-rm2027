@@ -3,6 +3,7 @@ CONFIG_BOARD_ARCHITECTURE="cortex-m7"
 CONFIG_BOARD_NO_SDCARD=y
 CONFIG_BOARD_SERIAL_TEL1="/dev/ttyS2"   # USART3（本板唯一空闲串口）
 CONFIG_BOARD_SERIAL_RC="/dev/ttyS4"      # ★ RC（DBUS/W.BUS）走 UART5；缺这一行 rc_input 不会启动
+# CONFIG_BOARD_SERIAL_GPS1="/dev/ttyS6"   # 2026-11-14 暂时关闭，见下方「外置 GPS」说明
 CONFIG_DRIVERS_ADC_BOARD_ADC=y
 CONFIG_DRIVERS_BAROMETER_GOERTEK_SPA06=y
 CONFIG_DRIVERS_DSHOT=y
@@ -63,6 +64,22 @@ CONFIG_DRIVERS_PWM_OUT=y
 # 2026-11-04 实测确认：断电重启后 i2cdetect -b 1 在 0x29 有 ACK，总线与器件均正常。
 # 用上游 vl53l0x 驱动（10-18 那套软 I2C 是旧板判断，已作废）。
 CONFIG_DRIVERS_DISTANCE_SENSOR_VL53L0X=y
+# --- 外置 GPS / 模块罗盘：2026-11-13 暂时关闭 -------------------------------
+# 实物 = 普锐微（UPRII）PU-122Q（主芯片 u-blox M10050 / M10 平台，内置 QMC5883L 罗盘）。
+# 调试结论（2026-11-13/14）：
+#   · 串口链路、接线、波特率全部验证正常；驱动能读到数据（rate reading 72 B/s）。
+#   · 从飞控内存抓到的原始数据确认为标准 NMEA（$GNRMC/$GNGGA/$GNGSA/$GNGLL/$GNVTG），
+#     且有 $GNTXT ... HW UBX 10 000A0000 ⇒ 硬件确为 u-blox M10。
+#   · 但 GGA 全程 0 颗星、fix 无效 —— **室内收不到卫星信号**，属正常现象。
+#     驱动要等有效定位帧才报 OK，所以 indoor 永远显示 NOT OK。
+#   · 模块罗盘（QMC5883L）需要飞线到 U19（PE0/PE1），因 UART8 让位而暂不启用。
+#
+# 因此以下配置全部注释掉，等真正要用时（到室外验证过定位后）再打开：
+#   CONFIG_BOARD_SERIAL_GPS1="/dev/ttyS6"    ← 文件顶部第 6 行也一并注释
+#   CONFIG_DRIVERS_GPS=y
+#   CONFIG_GPS_UBX=y
+#   CONFIG_DRIVERS_MAGNETOMETER_QMC5883L_SOFTI2C=y
+# 驱动源码保留：src/drivers/magnetometer/qmc5883l_softi2c/、src/lib/softi2c/
 CONFIG_DRIVERS_RC_INPUT=y
 CONFIG_COMMON_TELEMETRY=y
 CONFIG_MODULES_ATTITUDE_ESTIMATOR_Q=y

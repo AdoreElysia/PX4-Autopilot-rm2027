@@ -1,0 +1,11 @@
+menuconfig DRIVERS_MAGNETOMETER_QMC5883L_SOFTI2C
+	bool "qmc5883l_softi2c"
+	default n
+	---help---
+		Enable support for a QMC5883L magnetometer connected over a
+		software (bit-banged) I2C bus built from two plain GPIOs.
+
+		Needed on boards that do not route a usable hardware I2C bus to a
+		connector (e.g. rm2027/fmu-h743). The board must define
+		BOARD_QMC5883L_SOFTI2C_SCL_PINSET and BOARD_QMC5883L_SOFTI2C_SDA_PINSET
+		in its board_config.h.

@@ -39,9 +39,8 @@ px4_add_module(
 		vl53l0x_softi2c_main.cpp
 		VL53L0XSoftI2C.cpp
 		VL53L0XSoftI2C.hpp
-		SoftI2C.cpp
-		SoftI2C.hpp
 	DEPENDS
 		drivers_rangefinder
 		px4_work_queue
+		softi2c
 	)
