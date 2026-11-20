@@ -264,7 +264,7 @@ CONFIG_STDIO_BUFFER_SIZE=256
 
 # ── syslog 出口（2026-11-18 修复）─────────────────────────────────────
 #
-# ★ 症状：固件能启动，但 flowtest 一调用 PX4_ERR/PX4_INFO 就永久卡死，
+# ★ 症状：固件能启动，但任何一次 PX4_ERR/PX4_INFO 都会让调用线程永久卡死，
 #   ST-Link 抓到 PC 停在 syslog_flush()（nuttx/drivers/syslog/syslog_flush.c:90），
 #   PC 读数连续多次完全不变 —— 不是"跑得慢"，是死循环。
 #

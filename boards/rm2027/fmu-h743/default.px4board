@@ -129,12 +129,6 @@ CONFIG_MODULES_UXRCE_DDS_CLIENT=y
 CONFIG_MODULES_VTOL_ATT_CONTROL=y
 CONFIG_SYSTEMCMDS_ACTUATOR_TEST=y
 CONFIG_SYSTEMCMDS_DMESG=y
-# 光流单测工具（自研 src/systemcmds/flowtest）
-#   测试板只焊主控及其外围 ⇒ 没有 IMU / VL53 ⇒ PX4 的 VehicleOpticalFlow 拿不到
-#   陀螺和高度，正式光流链路永远出不来数据。这个工具绕开全部上层，
-#   直接操作 SPI3 读芯片，用固定高度（默认 10cm）换算成 m/s，从 U21(USART2) 输出。
-#   本板二进制里 `flowtest start` 即可用；不需要时注释掉这一行。
-CONFIG_SYSTEMCMDS_FLOWTEST=y
 CONFIG_SYSTEMCMDS_GPIO=y
 CONFIG_SYSTEMCMDS_H104CAP=y
 CONFIG_SYSTEMCMDS_HARDFAULT_LOG=y

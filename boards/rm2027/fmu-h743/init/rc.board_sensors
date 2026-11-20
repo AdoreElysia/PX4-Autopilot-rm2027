@@ -282,36 +282,14 @@ vl53l0x start -I -b 1 -a 0x29 -R 25
 #   又乘一次，两处都设 = 转两次（会差 90/180 度，极难查）。
 #   ⚠️ 待办：装到机架上之后要实测定朝向。判定方法见交接文档 §5。
 #
-# ★ 2026-11-18：**暂时注释掉**，因为当前测试板没焊 IMU/VL53，
-#   正式链路（sensor_optical_flow → VehicleOpticalFlow → EKF2）出不来数据。
-#   而且这条和 `flowtest start` 会抢同一片 CS(PE14)：
-#   Motion/Delta 寄存器是**读后清零**，两边同时读会互相偷走运动量。
-#   等测试板上验证完 flowtest、把 IMU/VL53 焊回来之后，再取消下面这行的注释。
+# ★ 2026-11-18：光流**已验证 OK**，正式接入。
+#   SPI3 通、芯片认得出（Product_ID=0x49）、Squal 15~42、RawData 有明暗差，
+#   静止时位移为 0。详见 docs/交接-光流PMW3901-2026-11-17.md。
 #
-# pmw3901 start -s -b 3 -R 0
-
-# 光流单独测试工具（自研 src/systemcmds/flowtest）——测试板上用这个
-#   它绕开 PX4 全部上层，直接操作 SPI3，用固定高度换算，从 U21(USART2) 输出。
-#
-# ★ 2026-11-18：**开机自动启动**，因为这个固件没有串口控制台
-#   （CONFIG_NO_SERIAL_CONSOLE=y，8 个串口的 *_SERIAL_CONSOLE 全没设）
-#   ⇒ 你没法在板上敲 `flowtest start`。
-#   ⇒ 只能让它在启动时就跑起来，数据直接往 U21 上吐。
-#   下面这一行就是"上电即测"：
-#       插上 USB-TTL（U21.3→TTL.RX，U21.4→TTL.GND），115200 8N1，就能看到数据。
-#
-# 参数说明（改这里要重编固件，因为 ROMFS 是编进去的）：
-#   默认 = /dev/ttyS1（U21）、10cm、10ms 采样、100ms 打印一行
-#   想用 CSV：      flowtest start -C
-#   想改高度：      flowtest start -z 0.15      （手册下限 80mm，建议先 15~20cm）
-#   想看芯片 ID：   flowtest                    （但要把下面这行先注释掉，否则串口抢）
-flowtest start
-
-#   其余用法（需要串口命令行才用得上，本板暂时没有）：
-#         flowtest start -d /dev/ttyS2   换输出口（U17/TEL1）
-#         flowtest stop                  停止
-#         flowtest status                查看状态
-#   完整参数见 docs/flowtest-光流单测工具-2026-11-18.md
+#   注：验证阶段用过的一次性测试工具（绕开 sensors/EKF 直读 SPI3）已移除 ——
+#   它和本驱动抢同一片 CS(PE14)，而 Motion/Delta 是**读后清零**寄存器，
+#   两边同时读会互相偷走运动量。正式固件只用这条。
+pmw3901 start -s -b 3 -R 0
 
 # ── 光流 → EKF2 的数据链（不需要额外启动行，但要知道它在哪断）────────
 #
