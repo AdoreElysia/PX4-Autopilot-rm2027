@@ -1,0 +1,19 @@
+menuconfig SYSTEMCMDS_FLOWTEST
+	bool "flowtest"
+	default n
+	---help---
+		PMW3901 光流单独测试工具（不依赖 PX4 的 sensors / EKF 链路）。
+
+		为什么需要它：正式固件里光流数据要经过
+		    pmw3901 驱动 → sensor_optical_flow
+		    → sensors 模块 VehicleOpticalFlow（需要陀螺 + 朝下测距）
+		    → vehicle_optical_flow → EKF2
+		而本板（测试板）只焊了主控及其外围，**没有 IMU、没有 VL53**，
+		中间那层 VehicleOpticalFlow 拿不到陀螺和高度，整条链路永远出不来数据。
+		所以本工具绕开 PX4 全部上层：直接操作 SPI3 读芯片原始寄存器，
+		用**固定高度**把像素流换算成 m/s，从指定串口打印出来。
+
+		符号全名（写进 board 的 default.px4board）：
+		  CONFIG_SYSTEMCMDS_FLOWTEST=y
+
+		用法见 `flowtest` 无参数时的帮助输出。

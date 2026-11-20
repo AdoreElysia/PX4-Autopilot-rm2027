@@ -194,6 +194,22 @@ CONFIG_STM32H7_SPI1_DMA_BUFFER=2048
 CONFIG_STM32H7_SPI2=y
 CONFIG_STM32H7_SPI2_DMA=y
 CONFIG_STM32H7_SPI2_DMA_BUFFER=2048
+# SPI3 = 外挂光流 PMW3901（2026-11-17 新增）。
+#   SCK=PC10  MISO=PC11  MOSI=PB2(AF7)，CS 走普通 GPIO = PE14（网络名 TIM1_CH4，见 spi.cpp）。
+#   这一组是板上的 5 孔排针（丝印 GND / SCK / MISO / MOSI / PE14），整条 SPI3 加一根
+#   GPIO 都引到了这个座上 —— 板级 spi.cpp 里的注释说 SPI3「空闲」，指的是没挂板载芯片，
+#   不是没引出。
+#   ⚠️ 不开这个 ⇒ initSPIBus(SPI::Bus::SPI3) 会在运行时找不到 /dev/spi3，光流起不来；
+#      而且 validateSPIConfig() 是 constexpr 断言（spi_hw_description.h:39-92），
+#      「NuttX 开了 SPI3 但板级没登记」和反过来「板级登记了但 NuttX 没开」都会编译失败。
+#   ★ 2026-11-18：**不用 DMA，改轮询**。
+#     最初按 SPI1/SPI2 的做法开了 CONFIG_STM32H7_SPI3_DMA，上板后 SPI3 能初始化
+#     （CR1 的 SPE/MSTR 都置上了、引脚也是 ALT），但第一次读寄存器就卡住不返回：
+#       SPI3 SR = 0x00001802（TXP 有空间、RXP 始终没数据）
+#       SPI3 CFG1 = 0x00000000（数据宽度/模式根本没写进去 ⇒ 说明传输没走到配置那一步）
+#     关掉 DMA 后走纯轮询，一次只读 12 字节、10 ms 一次，完全不需要 DMA。
+#     ⇒ 这也是排掉"是不是 DMA 通道 61/62 和定时器/串口抢"这个变量的最快办法。
+CONFIG_STM32H7_SPI3=y
 CONFIG_STM32H7_SPI_DMATHRESHOLD=8
 CONFIG_STM32H7_TIM15=y
 CONFIG_STM32H7_TIM1=y
@@ -245,3 +261,20 @@ CONFIG_USART6_TXBUFSIZE=1500
 CONFIG_USEC_PER_TICK=1000
 CONFIG_WATCHDOG=y
 CONFIG_STDIO_BUFFER_SIZE=256
+
+# ── syslog 出口（2026-11-18 修复）─────────────────────────────────────
+#
+# ★ 症状：固件能启动，但 flowtest 一调用 PX4_ERR/PX4_INFO 就永久卡死，
+#   ST-Link 抓到 PC 停在 syslog_flush()（nuttx/drivers/syslog/syslog_flush.c:90），
+#   PC 读数连续多次完全不变 —— 不是"跑得慢"，是死循环。
+#
+# ★ 根因：本板是 CONFIG_NO_SERIAL_CONSOLE=y（8 个串口的 *_SERIAL_CONSOLE 全没设），
+#   于是 syslog 的默认出口链一个都没接上：
+#       SYSLOG_CHARDEV 未开 / RAMLOG 未开 / SYSLOG_CONSOLE 未开
+#   而 CONFIG_SYSLOG=y 仍然成立 ⇒ 任何 PX4_INFO/ERR 进去都在等一个不存在的消费者。
+#
+# ★ 修法：开 RAMLOG，让 syslog 写进内存环形缓冲（由 /dev/kmsg 提供）。
+#   这样日志有了真实的出口，不会阻塞；需要时还能用 `dmesg` 读出来。
+#   这与"没有串口控制台"并不矛盾 —— RAMLOG 是内存缓冲，不依赖串口。
+CONFIG_RAMLOG=y
+CONFIG_RAMLOG_SYSLOG=y

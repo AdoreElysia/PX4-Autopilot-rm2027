@@ -59,6 +59,18 @@ CONFIG_COMMON_MAGNETOMETER=y
 #       ⇒ 两颗都会编进固件。本行只是"显式声明板载件"，让配置自解释。
 CONFIG_DRIVERS_MAGNETOMETER_ISENTEK_IST8310=y
 CONFIG_DRIVERS_PWM_OUT=y
+# --- 光流：PixArt PMW3901MB（2026-11-17 新增）-------------------------------
+# 实物 = 紫色小板，丝印 "PMW3901 / Optical Flow Sensor"，9 针 2.54 排针
+#        （VIN GND MOSI CLK MISO CS RST MOT VRE）。板载 LDO，VIN 接 3.3V。
+# 手册 = 桌面 projects_crazyflie2_expansionboards_pot0189-pmw3901mb-txqt-ds-r1.00-...pdf
+#        （PixArt PMW3901MB Product Datasheet v1.00，2017-03-20）
+#   关键参数：VDD 1.8~2.1V（Table 3，**不能直吃 3.3V**）、4 线 SPI @2MHz、
+#            工作距离 80 mm~∞（所以装法比 VL53 灵活，但近处有盲区）、
+#            7.4 rad/s（Table 3）、Product_ID(0x00)=0x49（Table 9）。
+# 接线 = 板上 5 孔排针：GND · SCK(PC10) · MISO(PC11) · MOSI(PB2) · PE14(CS)
+#        ⇒ SPI3（板级登记见 src/spi.cpp 的 SPI3 段），CS 用 PE14。
+# ⚠️ 排针没带 3.3V，模块 VIN 要从旁边的 3.3V_H7 焊盘飞线；VRE 是 LDO 输出，别喂 3.3V。
+CONFIG_DRIVERS_OPTICAL_FLOW_PMW3901=y
 # --- 测距 ---------------------------------------------------------------
 # 板载激光测距 VL53L0CXV0DH/1 —— 硬件 I2C1（SCL=PB6 / SDA=PB7，板载 4.7k 上拉）
 # 2026-11-04 实测确认：断电重启后 i2cdetect -b 1 在 0x29 有 ACK，总线与器件均正常。
@@ -117,6 +129,12 @@ CONFIG_MODULES_UXRCE_DDS_CLIENT=y
 CONFIG_MODULES_VTOL_ATT_CONTROL=y
 CONFIG_SYSTEMCMDS_ACTUATOR_TEST=y
 CONFIG_SYSTEMCMDS_DMESG=y
+# 光流单测工具（自研 src/systemcmds/flowtest）
+#   测试板只焊主控及其外围 ⇒ 没有 IMU / VL53 ⇒ PX4 的 VehicleOpticalFlow 拿不到
+#   陀螺和高度，正式光流链路永远出不来数据。这个工具绕开全部上层，
+#   直接操作 SPI3 读芯片，用固定高度（默认 10cm）换算成 m/s，从 U21(USART2) 输出。
+#   本板二进制里 `flowtest start` 即可用；不需要时注释掉这一行。
+CONFIG_SYSTEMCMDS_FLOWTEST=y
 CONFIG_SYSTEMCMDS_GPIO=y
 CONFIG_SYSTEMCMDS_H104CAP=y
 CONFIG_SYSTEMCMDS_HARDFAULT_LOG=y

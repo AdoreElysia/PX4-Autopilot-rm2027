@@ -40,9 +40,10 @@
  *   SPI1 = IMU：华轩阳（HXY）「ICM-42688P」六轴模块，WHO_AM_I(0x01)=0x6A
  *          （厂商手册 §5.1；0x00 不是寄存器，手册 §4.1）
  *          SCK=PB3  MISO=PA6  MOSI=PD7   CS=PB4(GYRO_CS)   DRDY=PD6(GYRO_INT1)
- *   SPI2 = 空闲（SCK=PD3 MISO=PC2 MOSI=PC3）—— 本板未引出片选，故不声明设备
- *   SPI3 = 空闲（SCK=PC10 MISO=PC11 MOSI=PB2）—— 同上
- *   SPI4 = 本板未用（模板板用 PE12/13/14，本板 PE13 是 ESC DShot1、PE14 悬空）
+ *   SPI2 = Bosch BMI088  ACC CS=PC0(CSB1) DRDY=PE3(INT1) / GYR CS=PC1(CSB2) DRDY=PE4(INT3)
+ *   SPI3 = 外挂光流 PMW3901（2026-11-17 新增）
+ *          SCK=PC10 MISO=PC11 MOSI=PB2(AF7)  CS=PE14（网络名 TIM1_CH4，见下方 SPI3 段）
+ *   SPI4 = 本板未用（模板板用 PE12/13/14，本板 PE13 是 ESC DShot1、PE14 现给光流当 CS）
  *
  * ★★ 为什么 SPI1 上一次登记 6 个 IMU 驱动（2026-09-30，T-A）
  *
@@ -139,6 +140,38 @@ constexpr px4_spi_bus_t px4_spi_buses[SPI_BUS_MAX_BUS_ITEMS] = {
 		initSPIDevice(DRV_ACC_DEVTYPE_BMI088, SPI::CS{GPIO::PortC, GPIO::Pin0}, SPI::DRDY{GPIO::PortE, GPIO::Pin3}),
 		// 陀螺仪：  CS=PC1(CSB2)，DRDY=PE4(INT3)
 		initSPIDevice(DRV_GYR_DEVTYPE_BMI088, SPI::CS{GPIO::PortC, GPIO::Pin1}, SPI::DRDY{GPIO::PortE, GPIO::Pin4}),
+	}),
+
+	/* SPI3 = 外挂光流 PMW3901MB（2026-11-17）
+	 *
+	 * 板上的 5 孔排针（2026-11-17 从 EasyEDA 工程 26.1无人机飞控&电调 / FMU_1 PCB 直读的网络名）：
+	 *     位号顺序（丝印）  GND · SCK · MISO · MOSI · PE14
+	 *     PCB 网络名        GND · SPI3_SCK(PC10) · SPI3_MISO(PC11) · SPI3_MOSI(PB2) · TIM1_CH4(PE14)
+	 *
+	 * ★ 丝印「PE14」= MCU 的 PE14 = 网络名 TIM1_CH4。
+	 *   本板 timer_config.cpp 原本把 PE14 当"悬空单点网络"（05-06 那版网表里它确实只有一个
+	 *   焊盘），但现版 PCB 上 TIM1_CH4 有两个焊盘：U1.44(MCU) 与这个排针 ⇒ **已经引出来了**，
+	 *   正好当 PMW3901 的片选（NCS）用。
+	 *   ⚠️ PE14 仍然【不接任何 ESC】。四路 DShot 是 PE13/PE11/PC8/PC9
+	 *      （timer_config.cpp:105-108），不要因为 "TIM1_CH4" 这个名字以为 PE14 在驱动电机。
+	 *      PWM_MAIN_FUNC 里也不要把第 5 路指向它 —— 这里只把它当纯 GPIO 片选。
+	 *
+	 * ★ 电气注意：PMW3901MB-TXQT 的 VDD 是 1.8~2.1V（手册 Table 3），芯片本体不能吃 3.3V。
+	 *   这个模块（紫色小板，丝印 "PMW3901 / Optical Flow Sensor"）自带 LDO：
+	 *   模块 9 针 = VIN/GND/MOSI/CLK/MISO/CS/RST/MOT/VRE，VIN 接 3.3V（本板 3.3V_H7）。
+	 *   本板这排 5 孔没有 3.3V，需要从旁边 3.3V_H7 焊盘飞一根线到模块 VIN。
+	 *   VRE 是 LDO 输出（≈2V，给芯片 VDD），**不要**往它上面接 3.3V。
+	 *
+	 * ★ SPI 模式：驱动写死 SPIDEV_MODE0（pmw3901_main.cpp:55，2 MHz）。
+	 *   手册没有明说 CPOL/CPHA，但 PX4 上游与 Bitcraze 参考实现都用 Mode 0，照用。
+	 *   若 probe 读 Product_ID(0x00) 不是 0x49，先怀疑模式而不是焊接（PMW3901.cpp:213）。
+	 *
+	 * ★ DRDY：不登记 MOTION（MOT）。驱动走定时调度（PMW3901_SAMPLE_INTERVAL=10ms，
+	 *   PMW3901.hpp:44），RunImpl 里请查询寄存器，不依赖中断引脚 ⇒ MOT 悬空即可。
+	 */
+	initSPIBus(SPI::Bus::SPI3, {
+		// CS = PE14（排针第 5 孔，网络名 TIM1_CH4）；DRDY 不给（MOT 不接）
+		initSPIDevice(DRV_FLOW_DEVTYPE_PMW3901, SPI::CS{GPIO::PortE, GPIO::Pin14}),
 	}),
 };
 

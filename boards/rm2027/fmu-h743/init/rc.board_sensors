@@ -250,6 +250,95 @@ spa06 -I -b 2 -a 0x77 start
 #   ⚠ 不要用 ST-Link 反复 halt 读寄存器：会把 VL53 搞进降级态（见 10-18 文档 §11.3）
 vl53l0x start -I -b 1 -a 0x29 -R 25
 
+# ── 外挂光流 PMW3901MB on SPI3（2026-11-17 新增）─────────────────────
+#
+# 实物 = 紫色小板，丝印 "PMW3901 / Optical Flow Sensor"，9 针排针
+#        （VIN GND MOSI CLK MISO CS RST MOT VRE），板载 LDO，VIN 接 3.3V。
+# 手册 = 桌面 projects_..._pmw3901mb-txqt-ds-r1.00-....pdf（PixArt v1.00）
+#   Table 1 引脚：NCS(19) SCLK(17) MOSI(16) MISO(18) NRESET(7) MOTION(15)
+#   Table 3 电气：VDD 1.8~2.1V（**芯片本体不能直吃 3.3V**，靠模块上的 LDO 降压）
+#   Table 3 光学：工作距离 80 mm ~ ∞、视场角 42°、最大 7.4 rad/s
+#   Table 9 寄存器：Product_ID(0x00) = 0x49 ⇒ 驱动的 probe() 就认这个值
+#                  （PMW3901.cpp:213-218），读不到 0x49 就不会启动实例。
+#
+# 接线 = 板上 5 孔排针（EasyEDA FMU_1 PCB 网络名直读）：
+#     GND · SCK=PC10(SPI3_SCK) · MISO=PC11(SPI3_MISO) · MOSI=PB2(SPI3_MOSI) · PE14(CS)
+#   ⚠️ 排针不带 3.3V：模块 VIN 要从旁边的 3.3V_H7 焊盘飞一根线。
+#      VRE 是模块上 LDO 的输出（≈2V，供芯片 VDD）—— **不要把 3.3V 接到 VRE**。
+#      RST 可以接 3.3V 或悬空（芯片内部有上电复位；驱动 init 里还会写一次
+#      Power_Up_Reset(0x3A)=0x5A，见 PMW3901.cpp:52-53）。
+#      MOT（MOTION）悬空即可：驱动走 10 ms 定时查询，不用这个中断脚。
+#
+# 启动参数：
+#   -s -b 3   = 板载内部 SPI 总线 3（spi.cpp 里的 initSPIBus(SPI::Bus::SPI3)）
+#                —— 必须 -s（internal），本板没有 external SPI；
+#               -b 3 与 /dev/spi3 对应，漏掉会遍历所有总线、报 no instance started。
+#   -R 0      = 光流模块的 X 轴朝向机头。**装好之后要按实际朝向改**，见下方说明。
+#
+# 关于 -R（写在驱动里，不是板级后处理）：
+#   PMW3901.cpp:317-321 在发布前调用 rotate_3f(_yaw_rotation, ...)，即驱动内部就把
+#   像素流从「传感器系」转到「机体系」。所以这里的 -R 是**唯一的**轴向补偿点，
+#   不要再去动 SENS_FLOW_ROT —— 那一个在 sensors/VehicleOpticalFlow.cpp:94
+#   又乘一次，两处都设 = 转两次（会差 90/180 度，极难查）。
+#   ⚠️ 待办：装到机架上之后要实测定朝向。判定方法见交接文档 §5。
+#
+# ★ 2026-11-18：**暂时注释掉**，因为当前测试板没焊 IMU/VL53，
+#   正式链路（sensor_optical_flow → VehicleOpticalFlow → EKF2）出不来数据。
+#   而且这条和 `flowtest start` 会抢同一片 CS(PE14)：
+#   Motion/Delta 寄存器是**读后清零**，两边同时读会互相偷走运动量。
+#   等测试板上验证完 flowtest、把 IMU/VL53 焊回来之后，再取消下面这行的注释。
+#
+# pmw3901 start -s -b 3 -R 0
+
+# 光流单独测试工具（自研 src/systemcmds/flowtest）——测试板上用这个
+#   它绕开 PX4 全部上层，直接操作 SPI3，用固定高度换算，从 U21(USART2) 输出。
+#
+# ★ 2026-11-18：**开机自动启动**，因为这个固件没有串口控制台
+#   （CONFIG_NO_SERIAL_CONSOLE=y，8 个串口的 *_SERIAL_CONSOLE 全没设）
+#   ⇒ 你没法在板上敲 `flowtest start`。
+#   ⇒ 只能让它在启动时就跑起来，数据直接往 U21 上吐。
+#   下面这一行就是"上电即测"：
+#       插上 USB-TTL（U21.3→TTL.RX，U21.4→TTL.GND），115200 8N1，就能看到数据。
+#
+# 参数说明（改这里要重编固件，因为 ROMFS 是编进去的）：
+#   默认 = /dev/ttyS1（U21）、10cm、10ms 采样、100ms 打印一行
+#   想用 CSV：      flowtest start -C
+#   想改高度：      flowtest start -z 0.15      （手册下限 80mm，建议先 15~20cm）
+#   想看芯片 ID：   flowtest                    （但要把下面这行先注释掉，否则串口抢）
+flowtest start
+
+#   其余用法（需要串口命令行才用得上，本板暂时没有）：
+#         flowtest start -d /dev/ttyS2   换输出口（U17/TEL1）
+#         flowtest stop                  停止
+#         flowtest status                查看状态
+#   完整参数见 docs/flowtest-光流单测工具-2026-11-18.md
+
+# ── 光流 → EKF2 的数据链（不需要额外启动行，但要知道它在哪断）────────
+#
+#   链路（2026-11-17 源码核实）：
+#     pmw3901 驱动   → sensor_optical_flow（本驱动直接发）
+#     sensors 模块   → vehicle_optical_flow（VehicleOpticalFlow.cpp，含陀螺积分、
+#                      测距融合、SENS_FLOW_ROT/SCALE/MINHGT/MAXHGT/MAXR 应用）
+#     EKF2           → 只用 vehicle_optical_flow（EKF2.hpp:358），
+#                      **不直接订阅 sensor_optical_flow**。
+#
+#   ⇒ 只起 pmw3901 而不起 sensors 模块 = EKF 永远看不到光流。
+#     sensors 是常驻模块（default.px4board 的 CONFIG_MODULES_SENSORS=y），无需手写启动行。
+#   ⇒ VehicleOpticalFlow 的构造条件是 sensor_optical_flow **已被 advertise**
+#     （sensors.cpp:486-497）；而 sensors 只在初始化时检查一次。
+#     本文件在 sensors 之前执行（rc.board_sensors 早于模块启动），所以顺序天然正确。
+#
+#   高度从哪来：VehicleOpticalFlow.cpp:352-405 只认 orientation == ROTATION_DOWNWARD_FACING
+#   的测距，且要求读数落在 [min_distance, max_distance] 内。本板 VL53L0X 的
+#   `-R 25` 正是 ROTATION_PITCH_270 = DOWNWARD_FACING（msg/DistanceSensor.msg:40）
+#   ⇒ 上面那条 vl53l0x 启动行同时是光流的**高度源**，两者必须一起跑。
+#   没有有效测距 ⇒ 光流数据会被丢弃（不是报错，是静默不用），别误判成光流坏了。
+#
+#   其它前提（不在本文件）：
+#     CONFIG_DRIVERS_OPTICAL_FLOW_PMW3901=y  （default.px4board）
+#     CONFIG_STM32H7_SPI3=y                  （nuttx-config/nsh/defconfig）
+#     EKF2_OF_CTRL=1（缺省就是 1，见 ekf2/params_optical_flow.yaml:5-10）
+
 # ── 外置 GPS / 模块罗盘：2026-11-14 暂时停用 ──────────────────────────
 #
 # 实物 = 普锐微（UPRII）PU-122Q，主芯片 u-blox M10050（M10 平台），内置 QMC5883L 罗盘。

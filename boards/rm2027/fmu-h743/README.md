@@ -133,6 +133,30 @@ U14.2 与 U18.2 是同一根线（PE7），别往 U14 接遥测线。
 **回退**：硬件改版引出真 I²C 后，删驱动目录 + 三处配置，改用上游 `vl53l0x` 驱动
 （清单见 `docs/交接-VL53L0X测距-2026-10-18.md` §9）。
 
+### 3.7 光流 PMW3901MB：走**板载 SPI3**（2026-11-17，**待实测**）
+
+板上那个 5 孔排针（丝印 `GND / SCK / MISO / MOSI / PE14`）不是通用 IO ——
+它的 PCB 网络名是 `GND / SPI3_SCK(PC10) / SPI3_MISO(PC11) / SPI3_MOSI(PB2) / TIM1_CH4(PE14)`，
+即**整条 SPI3 + 一根片选脚**。2026-11-17 从 EasyEDA 工程 `26.1无人机飞控&电调` 直读网络名确认。
+
+- **驱动用上游的**，没有自研：`src/drivers/optical_flow/pmw3901/`（手册文件名里的
+  `crazyflie2_expansionboards` 就是这套方案的出处）。`probe()` 认 `Product_ID(0x00)==0x49`。
+- 引脚：SPI3 (PC10/PC11/PB2, 2 MHz, Mode 0)，CS = **PE14**；MOT/RST 都不接。
+- **电源要飞线**：排针不带 3.3V，模块 `VIN` 从旁边的 `3.3V_H7` 焊盘引。
+  芯片本体 VDD 上限 **2.1V**（手册 Table 3），`VRE` 是模块上 LDO 的**输出**，不能接电源。
+- 数据链：`sensor_optical_flow` →（`sensors` 模块 `VehicleOpticalFlow`）→
+  `vehicle_optical_flow` → EKF2。**EKF2 不直接订阅驱动发的那条**。
+- 高度源必须是朝下测距：本板 `vl53l0x ... -R 25`（= `ROTATION_DOWNWARD_FACING`）正好满足，
+  没有有效测距时光流会被**静默丢弃**。
+- `-R` 只在一处设：驱动内部（`PMW3901.cpp:317-321`）已经转到机体系，
+  所以 `SENS_FLOW_ROT` 保持 0，否则转两次。
+
+接线细节、验证步骤、`-R` 朝向判定、回退方法：`docs/交接-光流PMW3901-2026-11-17.md`。
+
+> ⚠️ 顺带修正：`src/timer_config.cpp:45-48` / `nuttx-config/include/board.h:449-451`
+> 里「SPI3 空闲」「PE14 悬空单点网络」是旧网表的判断。现版 PCB 上两者都已引出。
+> 但 **PE14 仍不驱动任何电机** —— 四路 DShot 是 `PE13/PE11/PC8/PC9`。
+
 ---
 
 ## 4. 既有约束（改之前先看这里）

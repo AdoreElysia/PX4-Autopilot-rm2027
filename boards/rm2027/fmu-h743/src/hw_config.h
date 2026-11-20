@@ -86,18 +86,37 @@
 
 #define APP_LOAD_ADDRESS               0x08020000
 #define BOOTLOADER_DELAY               5000
-/* ★ 本板（rm2027/fmu-h743）**没有 USB 硬件**
- *   → 关掉 USB 上传通道，只用串口通道上传固件
- *   → 串口通道模板板就有（/dev/ttyS0,57600 = USART1 = ttyS0）
- *   PX4 bootloader 支持 USART 上传（见 platforms/.../bootloader/common/bl.c 的 INTERFACE_USART）
+/* ★ 本板（rm2027/fmu-h743）**没有 USB 硬件**，也**没有引出的 USART1**
+ *
+ * ★★ 2026-11-18 实测结论：必须把 INTERFACE_USART 关成 0。
+ *
+ *   原来这里写 INTERFACE_USART=1 / "/dev/ttyS0,57600"，理由是"模板板就有串口通道"。
+ *   但本板原理图与网表（work/FMU2-引脚识别-20261030/netlist-FMU_1.txt）里
+ *   **USART1 的四个脚 PA9/PA10/PB14/PB15 一个焊点都没有** —— 全部悬空。
+ *
+ *   后果（实测踩到，排查了很久）：
+ *     1. bootloader 在 USART1 上等上传命令（bl.c:642-662 的 while(true) 循环）；
+ *     2. PA10(RX) 浮空，收到噪声；
+ *     3. 噪声被当成命令字节 ⇒ 拼出 GET_SYNC/CHIP_ERASE ⇒ **把 app 区整片擦掉**；
+ *     4. 擦完之后 jump_to_app() 发现向量表是 0xFFFFFFFF，跳不过去；
+ *     5. bootloader 顺手把 BOOT_RTC_SIGNATURE(0xb007b007) 写进 RTC_BK0R；
+ *     6. 之后每次复位都因为读到这个签名而 timeout=0，**永远停在 bootloader**。
+ *   现象就是："固件明明烧进去了，一复位就回到 bootloader，app 区变成 ffffffff"。
+ *
+ *   ⇒ 关掉 USART 通道后，bootloader 只做"延时 5 s → 跳 app"，
+ *     既不擦 flash，也不写真签名。
+ *
+ * ⚠️ 代价：**没有串口上传固件的通道了**。本板本来就只能用 ST-Link 烧写
+ *   （README §3.5、§6 也是这个结论），所以没有实际损失。
+ *   以后若真把 USART1 引到座子上，把这两行改回 1 即可。
  */
 #define INTERFACE_USB                  0
 // #define INTERFACE_USB_CONFIG        "/dev/ttyACM0"
 // #define BOARD_VBUS                  MK_GPIO_INPUT(GPIO_OTGFS_VBUS)   /* 本板无 VBUS 检测脚 */
 
 //#define USE_VBUS_PULL_DOWN
-#define INTERFACE_USART                1
-#define INTERFACE_USART_CONFIG         "/dev/ttyS0,57600"
+#define INTERFACE_USART                0
+// #define INTERFACE_USART_CONFIG       "/dev/ttyS0,57600"
 /* ★ 必须与 firmware.prototype 的 board_id 一致（本板 = 2027） */
 #define BOARD_TYPE                     2027
 #define _FLASH_KBYTES                  (*(uint32_t *)0x1FF1E880)

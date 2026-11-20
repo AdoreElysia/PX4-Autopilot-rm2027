@@ -45,6 +45,20 @@
 #define DMAMAP_SPI2_RX    DMAMAP_DMA12_SPI2RX_0 /* DMA1:39 */
 #define DMAMAP_SPI2_TX    DMAMAP_DMA12_SPI2TX_0 /* DMA1:40 */
 
+// SPI3 = 外挂光流 PMW3901（2026-11-18 新增）。
+// ★★ 这两行是**编译期必需**的：NuttX 的 stm32_spi.c:551-552 在
+//    #ifdef CONFIG_STM32H7_SPI3_DMA 里直接引用 DMAMAP_SPI3_RX/TX。
+//    H7 的 dmamux 头只提供 DMAMAP_DMA12_SPI3RX_0/1 与 _TX_0/1 这种全名，
+//    没有缩写别名 ⇒ 不在这里补上，stm32_spi.c 会编译失败：
+//        error: 'DMAMAP_SPI3_RX' undeclared
+//    ⚠️ 这个错误的可怕之处：它发生在 NuttX 子构建里，而 PX4 的增量构建
+//       会沿用上一次的 libarch.a（表现为 "编译成功"，但固件里根本没有
+//       g_spi3dev 符号，运行时 px4_spibus_initialize(3) 返回 NULL，
+//       报 -ENODEV）。2026-11-18 排查很久，根因就是这里缺两行。
+// 选 _0（DMA1）与 SPI1/SPI2 保持一致。
+#define DMAMAP_SPI3_RX    DMAMAP_DMA12_SPI3RX_0 /* DMA1:61 */
+#define DMAMAP_SPI3_TX    DMAMAP_DMA12_SPI3TX_0 /* DMA1:62 */
+
 
 // DMAMUX2
 #define DMAMAP_SPI4_RX    DMAMAP_DMA12_SPI4RX_1 /* DMA2:83 */
